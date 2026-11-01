@@ -1,0 +1,13 @@
+<linker>
+  <!--
+    IL2CPP 裁剪保护（真机报错：Can't add component because class 'BoxCollider' doesn't exist!）。
+    PlaneAnchorPlacer 用 GameObject.CreatePrimitive(PrimitiveType.Cube) 运行时生成标记，
+    该 API 在运行时添加 BoxCollider；而工程开启了 Strip Engine Code（stripEngineCode: 1），
+    代码与场景（ARPlane.prefab 用的是 MeshCollider）没有任何静态引用 BoxCollider 的地方，
+    链接器会把 BoxCollider 类裁掉，导致真机点击平面放置标记时报错。
+    精准保留 BoxCollider 一个类型即可，不影响其他裁剪收益。
+  -->
+  <assembly fullname="UnityEngine.PhysicsModule">
+    <type fullname="UnityEngine.BoxCollider" preserve="all" />
+  </assembly>
+</linker>
