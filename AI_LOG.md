@@ -1,4 +1,62 @@
 
+## P-027
+
+- 目标：用户再次反馈"仍不能成功识别裂缝"，要求**换个思路**定位并修改平面识别不出来的错误（附真机截图：30 秒超时提示）。
+
+### Prompt 原文
+
+> 这个问题还是没有修改，不能成功的识别裂缝啊，定位这个错误，换个思路进行修改
+
+### 结果
+
+- 换思路的判断：此前所有修复都围绕"让平面检测更宽容"（放宽跟踪态、失败可见反馈、超时提示），但**本质依赖没变——平面收敛不出来时整条链路就是死的**（无平面 → 无法放置 → 无从提交）。低纹理环境下 ARCore 平面可能长时间达不到 0.12m 收敛门槛，而**点云特征点此时通常已存在**。故改为"平面优先 + 点云兜底"双通道：
+  1. **`PlaneAnchorPlacer.TryPlace` 双通道放置**：先按原逻辑 `PlaneWithinPolygon` 命中且平面可用 → 精确放置（`LastPlacementOnPlane=true`）；失败则降级 `TrackableType.FeaturePoint` 射线取最近特征点 → 按点云深度估算放置（`LastPlacementOnPlane=false`、`planeId` 留空、姿态取 `Quaternion.identity` 平放，因点云法线不可靠）。两条都 miss 才返回 `NoPlaneHit`。`NoUsablePlane` 分支被点云兜底吸收（枚举保留，ReportPanel 的 case 兼容防御）。
+  2. **放置方式可见**：`ReportPanel` 成功分支按 `LastPlacementOnPlane` 区分文案——平面放置照旧灰字；点云估算放置用黄字明示"位置可能有偏差，建议平面稳定后取消重放"，不冒充精确。
+  3. **超时提示分诊**（新诊断分支）：超时后若 `RawPlaneCount > 0`（有原始碎面只是没收敛），提示"已检测到 N 个初步平面但尚未稳定，继续画弧平移；也可直接点击（点云估算放置）"；原始面也为 0 才提示换环境。消除"明明有初步面却说完全没识别到"的误导。
+- 交付：`Assets/Scripts/AR/PlaneAnchorPlacer.cs`（双通道 TryPlace + `LastPlacementOnPlane` + `RawPlaneCount`）、`Assets/Scripts/UI/ReportPanel.cs`（放置方式文案 + 超时分诊）。
+- 验证：grep 复核新 API 三处引用齐全、`NoUsablePlane` 仅剩防御性 case；**未新增序列化字段，重新 Build And Run 即生效，无需重跑场景生成器**。
+- 防复发：点云放置精度低于平面已用黄字明示，不静默降级；后续若要求高精度（如裂缝测宽），可在点云放置后要求"等待平面收敛再提交"或对 planeId 为空的提交打标记。
+
+## P-026
+
+- 目标：用户真机反馈两个问题：① 平面一直识别不成功；② 后端上传失败"网络请求超时"，怀疑端口不一致（后端已改成 8083）。
+
+### Prompt 原文
+
+> 1.为什么不能成功识别，2.后端上传失败是为什么连接超时，是不是端口不一致导致的？目前后端又改成了8083（附真机截图）
+
+### 结果
+
+- **问题② 定位：端口没有不一致，错的是主机名。**
+  - 现场核查：后端监听 `0.0.0.0:8083`（netstat 确认，非仅 127.0.0.1），`curl http://localhost:8083/api/v1/health` 与 `curl http://192.168.117.140:8083/api/v1/health` 均 200 → **8083 端口两侧一致，后端健康**。
+  - 真正原因：场景 `ApiBridge.baseUrl = http://localhost:8083`——**手机上的 localhost 指手机自己**，不是电脑，所以连接必然超时（与端口无关）。
+  - 修正：`Assets/Scenes/ARScene.unity` 的 `baseUrl` 改为 `http://192.168.117.140:8083`（本机 WLAN IPv4，已实测 health 200）。**重新 Build And Run 生效**。
+  - 遗留风险：Windows 防火墙无 8083 入站规则，手机首次连接可能被拦（本机自测通≠外机通）；且 DHCP 下 IP 可能变。需以管理员运行：
+    `netsh advfirewall firewall add rule name="AR-Inspection-Backend-8083" dir=in action=allow protocol=TCP localport=8083`
+- **问题① 定位：截图顶部提示已给出答案——平面检测 30s 超时，环境纹理不足（桌面为暗色光滑地砖，反光/低纹理），ARCore 无法收敛平面。** App 内超时与"点击未识别到平面"提示均按 P-023 预期触发（新反馈路径工作正常），非代码缺陷。已建议换浅色高纹理表面、缓慢平移；手机未连 USB，无法抓 logcat 进一步区分"ARCore 不支持/服务缺失"与"纯环境因素"。
+- 验证：health 经局域网 IP 200；场景 diff 仅 1 行 baseUrl；netstat 确认 0.0.0.0:8083。
+- 防复发：README 已知问题补充"手机端 localhost ≠ 电脑，必须用局域网 IP 或 adb reverse；防火墙需放行后端端口"；IP 变更后需同步改场景 baseUrl（或后续改用 adb reverse 不依赖 IP）。
+
+## P-025
+
+- 目标：用户真机反馈"当前显示的字体样式过于小"，修复 AR 端 UI 字号。
+
+### Prompt 原文
+
+> 当前显示的字体样式过于小，进行修复（附真机截图：表单区文字相对控件明显偏小）
+
+### 结果
+
+- 定位（逐对象核对场景 `ARScene.unity` 中 14 处 `m_FontSize`）：
+  - **根因（真 bug）**：三个输入框的**正文** Text 全是默认 **14px**——Unity 2022.3 起 Legacy InputField 的正文子物体改名 `Text (Legacy)`，场景生成器 `CreateField` 里 `transform.Find("Text")` 返回 null，赋字号的代码从未执行（占位符 `Placeholder` 名字没变所以正常）。
+  - **次要**：其余控件字号在 1080 参考分辨率下也偏保守（下拉 38/36、按钮 42、状态 38、引导 44）；`ReportPanel.OnGUI` 长按确认弹窗的 `GUI.Button` 用默认样式，真机字号极小。
+- 修正（三处同步）：
+  1. `Assets/Editor/InspectionSceneBuilder.cs`：`Find("Text") ?? Find("Text (Legacy)")` 兼容新旧命名；整体放大——输入框正文/占位符 40→**48**、下拉当前值 38→**44**、下拉选项 36→**42**、按钮 42→**48**、状态 38→**44**、引导 44→**52**。
+  2. **直接改现有场景** `Assets/Scenes/ARScene.unity`（脚本按父子关系映射批量替换 14 处字号，YAML 其余内容不动）——用户重新 Build And Run 即生效，无需重跑场景生成器。
+  3. `Assets/Scripts/UI/ReportPanel.cs`：确认弹窗新增 `confirmButtonStyle`（fontSize 44）并应用到两个 `GUI.Button`。
+- 验证：`grep m_FontSize` 复核场景 14 处全部为 42/44/48/52，无残留 14；`git diff` 显示场景仅字号行变化（-14×3/-36×2/-38×3/-40×3/-42×2/-44×1，+42×2/+44×3/+48×8/+52×1）；`confirmButtonStyle` 三处引用齐全。
+- 防复发：生成器内注明子物体名带 `(Legacy)` 后缀，新增 UI 字段须用 `Find` 兼容写法或 `GetComponentsInChildren` 兜底；放大后的字号档位（42/44/48/52）留在生成器注释，避免按旧默认值回退。
+
 ## P-024
 
 - 目标：用户真机复验 P-023 后反馈两点：①"成功识别裂缝后，点击裂缝没有反应"；②"出来了错误的裂缝识别区域，但是一直在跑，没有固定在正确的裂缝位置"。

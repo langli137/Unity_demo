@@ -68,6 +68,7 @@ namespace ParkInspect.UI
 
         // OnGUI 弹窗样式缓存（一次性创建避免每帧分配）。
         GUIStyle confirmLabelStyle;
+        GUIStyle confirmButtonStyle;
 
         void Awake()
         {
@@ -152,7 +153,11 @@ namespace ParkInspect.UI
             }
             if (placer.TryPlace(pos, fingerId, out PlaceFail fail))
             {
-                SetStatus("已放置标识（黄色）；确认后提交，或长按标识取消", Color.gray);
+                // 明示放置方式：平面命中=精确；点云估算=降级，位置可能有偏差。
+                SetStatus(placer.LastPlacementOnPlane
+                    ? "已放置标识（黄色）；确认后提交，或长按标识取消"
+                    : "平面未收敛，已按点云估算放置（位置可能有偏差）；建议移动手机等平面稳定后取消重放",
+                    placer.LastPlacementOnPlane ? (Color?)Color.gray : Color.yellow);
                 return;
             }
 
@@ -246,6 +251,8 @@ namespace ParkInspect.UI
                     wordWrap = true,
                 };
                 confirmLabelStyle.normal.textColor = Color.white;
+                // 默认 GUI.Button 字号在真机上极小（约 14px 级别），必须显式放大。
+                confirmButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 44 };
             }
 
             // 半透明遮罩：吸收触摸，防止确认期间误操作场景。
@@ -266,7 +273,7 @@ namespace ParkInspect.UI
             float btnW = (panel.width - 90) / 2f;
             float btnH = 110f;
             float btnY = panel.yMax - btnH - 40f;
-            if (GUI.Button(new Rect(panel.x + 30, btnY, btnW, btnH), confirmTargetActive ? "取消标识" : "移除标识"))
+            if (GUI.Button(new Rect(panel.x + 30, btnY, btnW, btnH), confirmTargetActive ? "取消标识" : "移除标识", confirmButtonStyle))
             {
                 if (confirmTargetActive)
                 {
@@ -281,7 +288,7 @@ namespace ParkInspect.UI
                 }
                 confirmShown = false;
             }
-            if (GUI.Button(new Rect(panel.x + 60 + btnW, btnY, btnW, btnH), "保留"))
+            if (GUI.Button(new Rect(panel.x + 60 + btnW, btnY, btnW, btnH), "保留", confirmButtonStyle))
             {
                 confirmShown = false;
             }
@@ -313,10 +320,19 @@ namespace ParkInspect.UI
                 // v1.3：不再无限累计"已等待 X 秒"。
                 // 正常检测需 5~20 秒；超过阈值直接给超时结论与解决办法。
                 float waited = Time.realtimeSinceStartup - detectStartTime;
+                int raw = placer.RawPlaneCount;
                 if (waited < DetectTimeoutSeconds)
                 {
                     guidanceText.text = "正在检测平面，请缓慢左右移动手机\n（通常需要 " +
                         NormalDetectSeconds.ToString("F0") + " 秒内，需光线充足、纹理丰富的表面）";
+                }
+                else if (raw > 0)
+                {
+                    // 关键诊断分支：有原始碎面但一个都没收敛 → 不再误报"完全没识别到"，
+                    // 告诉用户"已看到平面但不稳定"，并指引点云估算放置兜底。
+                    guidanceText.text = "已检测到 " + raw + " 个初步平面但尚未稳定\n" +
+                        "请继续缓慢画弧平移使其收敛；也可直接点击目标位置" +
+                        "（将按点云估算放置，位置可能有偏差）";
                 }
                 else
                 {
@@ -327,7 +343,7 @@ namespace ParkInspect.UI
                     {
                         planeFoundTime = -2f; // 只打一次超时日志
                         Debug.LogWarning("[ReportPanel] 平面检测超时（> " + DetectTimeoutSeconds +
-                            "s），已提示用户切换检测环境");
+                            "s，原始平面数 0），已提示用户切换检测环境");
                     }
                 }
             }

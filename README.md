@@ -45,6 +45,8 @@ npm run dev                # http://localhost:5173，/api 自动代理到 8083
 | **USB 联调（推荐）** | 保持默认 `http://localhost:8083`，电脑执行 `adb reverse tcp:8083 tcp:8083` | 手机上的 localhost 直通电脑后端，不依赖 Wi-Fi；拔插 USB 后需重新执行 |
 | 无线联调 | 改为电脑局域网 IP，如 `http://192.168.1.50:8083` | 手机与电脑同一 Wi-Fi，防火墙放行 8083 |
 
+> ⚠️ **手机上的 `localhost` 指手机自己，不是电脑**——不走 adb reverse 却填 localhost，提交必然连接超时（端口没配错，错的是主机名）。无线联调还需放行防火墙（管理员运行）：`netsh advfirewall firewall add rule name="AR-Inspection-Backend-8083" dir=in action=allow protocol=TCP localport=8083`；局域网 IP 变更后要同步改 Base Url。
+
 ## 4. 已完成 / 未完成 / 已知问题
 
 **已完成**

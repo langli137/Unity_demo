@@ -106,7 +106,7 @@ namespace ParkInspect.EditorTools
             panelSo.FindProperty("statusText").objectReferenceValue = ui.status;
             panelSo.FindProperty("guidanceText").objectReferenceValue = ui.guidance;
             panelSo.FindProperty("placer").objectReferenceValue = placer;
-            panelSo.FindProperty("baseUrl").stringValue = "http://localhost:8083"; // 真机改成电脑局域网 IP
+            panelSo.FindProperty("baseUrl").stringValue = "http://10.216.180.140:8083"; // 换网络后同步改为电脑当前局域网 IP（手机须与电脑同一网络）
             panelSo.ApplyModifiedPropertiesWithoutUndo();
 
             // ---------- 5. 保存 ----------
@@ -174,7 +174,7 @@ namespace ParkInspect.EditorTools
             {
                 ui.guidance = guidanceGo.GetComponent<Text>();
                 ui.guidance.text = "正在检测平面，请缓慢移动手机\n（通常需要 20 秒内）";
-                ui.guidance.fontSize = 44;
+                ui.guidance.fontSize = 52;
                 ui.guidance.alignment = TextAnchor.MiddleCenter;
                 ui.guidance.color = Color.white;
                 ui.guidance.horizontalOverflow = HorizontalWrapMode.Wrap;
@@ -248,7 +248,7 @@ namespace ParkInspect.EditorTools
                     ui.cancel = cancelGo.GetComponent<Button>();
                     SetRow(cancelGo, panelRect, ref y);
                     var label = cancelGo.GetComponentInChildren<Text>();
-                    if (label != null) { label.text = "取消标识"; label.fontSize = 42; }
+                    if (label != null) { label.text = "取消标识"; label.fontSize = 48; }
                 }
             }
 
@@ -275,17 +275,19 @@ namespace ParkInspect.EditorTools
             var field = go.GetComponent<InputField>();
             SetRow(go, parent, ref y);
 
-            var text = go.transform.Find("Text");
+            // 2022.3 起 Legacy InputField 的正文子物体叫 "Text (Legacy)"，
+            // 旧代码 Find("Text") 返回 null → 正文保持默认 14px（真机上几乎不可读）。
+            var text = go.transform.Find("Text") ?? go.transform.Find("Text (Legacy)");
             if (text != null)
             {
                 var t = text.GetComponent<Text>();
-                if (t != null) { t.fontSize = 40; t.alignment = TextAnchor.MiddleLeft; }
+                if (t != null) { t.fontSize = 48; t.alignment = TextAnchor.MiddleLeft; }
             }
             var ph = go.transform.Find("Placeholder");
             if (ph != null)
             {
                 var t = ph.GetComponent<Text>();
-                if (t != null) { t.text = placeholder; t.fontSize = 40; }
+                if (t != null) { t.text = placeholder; t.fontSize = 48; }
             }
             return field;
         }

@@ -60,6 +60,14 @@ namespace ParkInspect.AR
             submittedMarkers.Count > 0 ? MarkerState.Submitted : MarkerState.None;
         /// <summary>是否存在待提交标记。</summary>
         public bool HasMarker => activeMarker != null;
+        /// <summary>最近一次放置是否落在真实平面上（false = 点云估算降级放置）。</summary>
+        public bool LastPlacementOnPlane { get; private set; } = true;
+
+        /// <summary>
+        /// 原始平面数（含 ARCore 刚生成、未收敛的碎面），用于诊断展示：
+        /// 有原始面但可用面为 0 = "平面已出现但不稳定"，与"完全没识别到"要分开提示。
+        /// </summary>
+        public int RawPlaneCount => planeManager != null ? planeManager.trackables.count : 0;
         public float MarkerEdge => markerEdge;
         /// <summary>待提交标记的世界坐标（提交体 position 取值来源，FR-U-06）。</summary>
         public Vector3 MarkerPosition => activeMarker != null ? activeMarker.transform.position : Vector3.zero;
@@ -127,29 +135,55 @@ namespace ParkInspect.AR
             if (raycastManager == null) { fail = PlaceFail.NoPlaneHit; return false; }
 
             // PlaneWithinPolygon：射线须落进某平面的真实多边形内（不在识别区域内点击即 miss）。
-            if (!raycastManager.Raycast(screenPos, Hits, TrackableType.PlaneWithinPolygon))
-            { fail = PlaceFail.NoPlaneHit; return false; }
-
-            // 接受水平面与垂直面命中（墙面裂缝标记场景），并要求该平面可用（跟踪中 + 尺寸收敛）。
-            ARRaycastHit best = default;
-            bool found = false;
-            foreach (var hit in Hits)
+            if (raycastManager.Raycast(screenPos, Hits, TrackableType.PlaneWithinPolygon))
             {
-                if (!IsPlaceablePlane(hit.trackableId)) continue;
-                if (!found || hit.distance < best.distance)
+                // 接受水平面与垂直面命中（墙面裂缝标记场景），并要求该平面可用（跟踪中 + 尺寸收敛）。
+                ARRaycastHit best = default;
+                bool found = false;
+                foreach (var hit in Hits)
                 {
-                    best = hit;
-                    found = true;
+                    if (!IsPlaceablePlane(hit.trackableId)) continue;
+                    if (!found || hit.distance < best.distance)
+                    {
+                        best = hit;
+                        found = true;
+                    }
                 }
+                if (found)
+                {
+                    activeMarker = CreateMarker();
+                    activeMarker.transform.SetPositionAndRotation(best.pose.position, best.pose.rotation);
+                    currentPlaneId = best.trackableId.ToString();
+                    LastPlacementOnPlane = true;
+                    Tint(activeMarker, PlacedColor);
+                    fail = PlaceFail.None;
+                    return true;
+                }
+                // 命中了多边形但没有可用平面 → 走点云降级（见下），不再直接失败。
             }
-            if (!found) { fail = PlaceFail.NoUsablePlane; return false; }
 
-            activeMarker = CreateMarker();
-            activeMarker.transform.SetPositionAndRotation(best.pose.position, best.pose.rotation);
-            currentPlaneId = best.trackableId.ToString();
-            Tint(activeMarker, PlacedColor);
-            fail = PlaceFail.None;
-            return true;
+            // 换个思路：平面收敛不出来时降级用特征点云放置。
+            // 低纹理环境下 ARCore 平面可能始终达不到 0.12m 收敛门槛，但点云特征点已经存在；
+            // 此时按点云深度放置（位置为估算值，精度低于平面），并让 UI 明示"估算放置"。
+            if (raycastManager.Raycast(screenPos, Hits, TrackableType.FeaturePoint))
+            {
+                ARRaycastHit best = Hits[0];
+                foreach (var hit in Hits)
+                    if (hit.distance < best.distance) best = hit;
+
+                activeMarker = CreateMarker();
+                // 点云命中姿态的法线不可靠：保持水平面对齐（标记平放可见），避免立着/反向。
+                activeMarker.transform.SetPositionAndRotation(
+                    best.pose.position, Quaternion.identity);
+                currentPlaneId = ""; // 无平面归属：提交体 planeId 留空
+                LastPlacementOnPlane = false;
+                Tint(activeMarker, PlacedColor);
+                fail = PlaceFail.None;
+                return true;
+            }
+
+            fail = PlaceFail.NoPlaneHit;
+            return false;
         }
 
         /// <summary>
