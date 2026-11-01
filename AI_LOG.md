@@ -468,7 +468,7 @@
 
 > 我本地要暂存到github上面的代码太多了，我要怎么进行部署提交，我目前项目完成了最小demo
 > （追问）这个是我的远端仓库
-> （附 GitHub 仓库页截图：`langli1137/Unity_demo`，HTTPS 地址 `https://github.com/langli1137/Unity_demo.git`，空仓库 Quick setup 状态）
+> （附 GitHub 仓库页截图：`langli137/Unity_demo`，HTTPS 地址 `https://github.com/langli137/Unity_demo.git`，空仓库 Quick setup 状态）
 
 ### 结果
 
@@ -477,6 +477,6 @@
 - 交付：
   1. 重写 [.gitignore](.gitignore)：Unity 生成目录（Library/Temp/Obj/Logs/UserSettings/Build(s) 等，任意层级生效）、`My project/`（用户拍板不入库，本地保留）、Unity 生成 IDE 工程文件、`.idea/`、node_modules/dist、`backend/data/`、`*.exe/*.db`、`.env*`、系统杂项；保留原有"本项目暂不入库"约定（.screenshots/.trae/.workbuddy/docs/TASK_TEMPLATE.md）。
   2. 清空暂存区按新规则重加（`git rm -rfq --cached . && git add -A`），暂存从 10102 → **136 个文件**（Unity Assets 66 + ProjectSettings 22 + Packages 2、frontend 23、backend 19、根文档 4）。
-  3. 配置远程 `origin = https://github.com/langli1137/Unity_demo.git` 并推送 `main` 分支。
-- 检查/修改过程：首次 `git rm --cached` 报"staged content different from both the file and the HEAD"（Library 文件暂存后被 Unity 改写），改用清空暂存区重建；中途 `git add` 超时被杀留下**残留 index.lock** 导致后续 add 报 `Unable to create .git/index.lock`，确认无 git 进程后删锁重试成功（此即"检查并修改 AI 结果"的过程）；`backend/.idea/` 4 个 IDE 配置文件也已撤出并忽略。
+  3. 配置远程 `origin = https://github.com/langli137/Unity_demo.git` 并推送 `main` 分支（`* [new branch] main -> main`，已建立追踪）。
+- 检查/修改过程：首次 `git rm --cached` 报"staged content different from both the file and the HEAD"（Library 文件暂存后被 Unity 改写），改用清空暂存区重建；中途 `git add` 超时被杀留下**残留 index.lock** 导致后续 add 报 `Unable to create .git/index.lock`，确认无 git 进程后删锁重试成功（此即"检查并修改 AI 结果"的过程）；`backend/.idea/` 4 个 IDE 配置文件也已撤出并忽略；**推送首报 `Repository not found`——把截图小字 `langli137` 误读为 `langli1137` 配错了远程，经匿名 `git ls-remote` 双向探测（错误地址 404、正确地址空仓库正常返回）并与 Windows 凭据管理器登录名 `langli137` 比对确认后 `remote set-url` 修正，本条记录已同步改正**。
 - 验证：`git diff --cached` 复核 136 个文件按目录分布无 Library/node_modules/dist/.env 混入；提交后 GitHub 仓库页面可见推送内容；文档按用户拍板维持不入库。
