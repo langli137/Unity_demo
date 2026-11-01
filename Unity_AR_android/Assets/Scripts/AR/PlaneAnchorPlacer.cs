@@ -10,6 +10,18 @@ namespace ParkInspect.AR
     public enum MarkerState { None, Placed, Submitted }
 
     /// <summary>
+    /// 放置失败原因：用于把"点了没反应"变成可见反馈（用户反馈的核心问题——静默失败）。
+    /// </summary>
+    public enum PlaceFail
+    {
+        None,          // 放置成功
+        AlreadyPlaced, // 已有待提交标记（一次一个，不再移动）
+        OverUi,        // 点在按钮/输入框上（不提示，属正常 UI 交互）
+        NoPlaneHit,    // 点击处射线未落进任何平面多边形（可能超出识别区域边界）
+        NoUsablePlane, // 命中的平面还没收敛/已丢失跟踪（继续扫描即可）
+    }
+
+    /// <summary>
     /// 平面命中与标记放置（FR-U-02/03/08，v1.3 交互改版）：
     /// - 屏幕点命中平面（水平+垂直）才放置标记；
     /// - 放置即锁定：不再响应"点击移动"（v1.2 前的点击移动会被手持误触触发，导致标记跟着手机动）；
@@ -57,8 +69,7 @@ namespace ParkInspect.AR
 
         /// <summary>
         /// 已检测到的"可用"平面数量（供 UI 引导文案，FR-U-02）。
-        /// v1.3 修正识别依据：只统计已稳定跟踪（Tracking）且尺寸收敛的平面，
-        /// 不再把 ARCore 刚生成、还在漂移的初步面算作"已检测到平面"。
+        /// 只统计仍在跟踪且尺寸收敛的平面，不把 ARCore 刚生成、还在漂移的初步碎面算作"已检测到平面"。
         /// </summary>
         public int PlaneCount
         {
@@ -77,14 +88,16 @@ namespace ParkInspect.AR
         }
 
         /// <summary>
-        /// 平面是否"可用"（识别依据）：ARPlane 位姿已稳定跟踪 且 短边尺寸达到阈值。
-        /// 排除 ARCore 早期那些还没收敛的斜面/小碎面，避免在错误平面上放置标识。
+        /// 平面是否"可用"（识别依据）：平面仍在跟踪中（未丢失）且短边尺寸达到阈值。
+        /// - 尺寸阈值是"已收敛"的主信号：ARCore 初步面只有几厘米，长到 MinPlaneShortSide 以上才是真实表面；
+        /// - 跟踪态放宽为"未 None"（TrackingState 合法值仅 None/Limited/Tracking）：低纹理环境下 ARCore 会把平面频繁降为 Limited，
+        ///   若强求 ==Tracking 会出现"平面明明显示着却点不上"（用户反馈的点击没反应），故只排除已丢失（None）的面。
         /// </summary>
         static bool IsUsablePlane(ARPlane plane)
         {
             if (plane == null) return false;
-            // 仅接受稳定跟踪中的平面（Limited/NotTracking 的平面仍在估计中，不可信）。
-            if (plane.trackingState != TrackingState.Tracking) return false;
+            // 已丢失跟踪（None）的平面不可放置（trackables 通常会移除，此处防御）。
+            if (plane.trackingState == TrackingState.None) return false;
             // 短边尺寸达到阈值才算收敛（ARPlane.size 为平面在自身坐标系下的宽×高，米）。
             return Mathf.Min(plane.size.x, plane.size.y) >= MinPlaneShortSide;
         }
@@ -96,17 +109,28 @@ namespace ParkInspect.AR
         /// </summary>
         public bool TryPlace(Vector2 screenPos, int pointerId = -1)
         {
+            return TryPlace(screenPos, pointerId, out _);
+        }
+
+        /// <summary>
+        /// 尝试放置标记，并通过 fail 输出失败原因——让 ReportPanel 把"点了没反应"变成可见反馈。
+        /// </summary>
+        public bool TryPlace(Vector2 screenPos, int pointerId, out PlaceFail fail)
+        {
             // 一次只能一个待提交标记：锁定后误触/再次点击都不会改变位置。
-            if (activeMarker != null) return false;
+            if (activeMarker != null) { fail = PlaceFail.AlreadyPlaced; return false; }
 
             // UI 穿透防护（FR-U-08）：点在 UI 上直接忽略，避免误放标记。
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(pointerId))
-                return false;
+            { fail = PlaceFail.OverUi; return false; }
 
-            if (raycastManager == null) return false;
-            if (!raycastManager.Raycast(screenPos, Hits, TrackableType.PlaneWithinPolygon)) return false;
+            if (raycastManager == null) { fail = PlaceFail.NoPlaneHit; return false; }
 
-            // 接受水平面与垂直面命中（墙面裂缝标记场景）。
+            // PlaneWithinPolygon：射线须落进某平面的真实多边形内（不在识别区域内点击即 miss）。
+            if (!raycastManager.Raycast(screenPos, Hits, TrackableType.PlaneWithinPolygon))
+            { fail = PlaceFail.NoPlaneHit; return false; }
+
+            // 接受水平面与垂直面命中（墙面裂缝标记场景），并要求该平面可用（跟踪中 + 尺寸收敛）。
             ARRaycastHit best = default;
             bool found = false;
             foreach (var hit in Hits)
@@ -118,12 +142,13 @@ namespace ParkInspect.AR
                     found = true;
                 }
             }
-            if (!found) return false;
+            if (!found) { fail = PlaceFail.NoUsablePlane; return false; }
 
             activeMarker = CreateMarker();
             activeMarker.transform.SetPositionAndRotation(best.pose.position, best.pose.rotation);
             currentPlaneId = best.trackableId.ToString();
             Tint(activeMarker, PlacedColor);
+            fail = PlaceFail.None;
             return true;
         }
 

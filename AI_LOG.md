@@ -1,4 +1,26 @@
 
+## P-024
+
+- 目标：用户真机复验 P-023 后反馈两点：①"成功识别裂缝后，点击裂缝没有反应"；②"出来了错误的裂缝识别区域，但是一直在跑，没有固定在正确的裂缝位置"。
+
+### Prompt 原文
+
+> 1.成功识别裂缝后，点击裂缝没有反应，修改这个错误
+> 2.出来了错误的裂缝识别区域，但是一直在跑，没有固定的显示在正确的裂缝位置，这个错误怎么修改？
+
+### 结果
+
+- 诊断（分清可修 bug 与环境机制）：
+  - **问题②（识别区域一直"跑"）**：ARCore 跟踪不稳，主因环境纹理太少（纯白桌面 + 黑色反光背包，特征点不足），SLAM 锁不住位姿、平面持续重估漂移。属 ARCore 底层机制 + 环境限制，**代码无法强制收敛**，只能靠有纹理表面 + 缓慢画弧平移。
+  - **问题①（点了没反应）**：两个叠加原因——(a) **静默失败**：旧 `TryPlace` 返回 false 时 `HandlePlacementTouch` 什么都不显示，射线没落进平面多边形 / 命中平面被拦下都表现为"没反应"；(b) **P-023 的 `trackingState == Tracking` 门槛过严**：低纹理下 ARCore 平面频繁降为 `Limited`，导致"平面明明显示着却点不上"。
+- 修正：
+  1. **放置失败可见反馈**（`PlaneAnchorPlacer` + `ReportPanel`）：新增 `PlaceFail { None/AlreadyPlaced/OverUi/NoPlaneHit/NoUsablePlane }` 枚举；`TryPlace` 增带 `out PlaceFail` 的重载（保留旧签名转发，不破坏其它调用）；`HandlePlacementTouch` 依原因给提示——NoPlaneHit→"请对准青色识别区域内部再点一次"、NoUsablePlane→"平面还没稳定，请缓慢画弧继续扫描"，OverUi 静默（点按钮属正常）。
+  2. **放宽可用平面判定**（`IsUsablePlane`）：`trackingState == Tracking` → 改为 `== TrackingState.None` 才拒绝（即接受 Tracking/Limited，只排除已丢失跟踪的面；**TrackingState 合法值仅 None/Limited/Tracking**），**保留 0.12m 尺寸门槛**作为"已收敛"主信号——尺寸是稳健信号，跟踪态在低纹理下抖动过严、致误拦。`PlaneCount`/`IsPlaceablePlane` 复用同一判定，显示口径与可放置口径一致。
+- 交付：`Assets/Scripts/AR/PlaneAnchorPlacer.cs`（PlaceFail 枚举 + TryPlace 重载 + IsUsablePlane 放宽）、`Assets/Scripts/UI/ReportPanel.cs`（HandlePlacementTouch 失败反馈）。
+- 验证：grep 复核——`TryPlace` 两重载并存、`PlaceFail` 枚举与 switch 分支一一对应；`PlaceFail` 属 `ParkInspect.AR`，ReportPanel 已 using。**未新增 Inspector 序列化字段，用户重新 Build And Run 即可（无需重跑场景生成器）**。
+- **勘误（用户 Console 截图发现）**：初版把枚举值写成 `TrackingState.NotTracking` → `CS0117: 'TrackingState' does not contain a definition for 'NotTracking'`（`Error building Player` 即由此编译错误引发）。根因：ARSubsystems 的 `TrackingState` 只有 `None/Limited/Tracking`，无 `NotTracking`。已改为 `TrackingState.None`，全仓 grep 仅剩该处合法用法。教训：**枚举成员名不能凭语感造，写 ARSubsystems/引擎枚举前须核对定义**。
+- 防复发：①"放置失败必须可见"落为 switch 注释，后续新增失败原因须同步补一条用户可见文案；②可用平面判定收紧/放宽的权衡（尺寸为主信号、跟踪态仅排除 None）写入 IsUsablePlane 注释，防止未来再次误加过严门槛；③识别区域漂移属环境/ARCore 机制，已向用户说明，若仍需更稳可考虑收窄 detectionMode（仅按需 Horizontal 或仅 Vertical），但会牺牲墙面/地面双支持，未擅自改。
+
 ## P-023
 
 - 目标：用户看真机截图反馈"这个是什么问题……我发现当前系统的识别依据不太正常，怎么修正这个错误的识别依据"——画面里平面可视化是一个深灰填充、粗黑边、斜切过空间的多边形，用户认为识别逻辑有问题。

@@ -150,8 +150,26 @@ namespace ParkInspect.UI
                 SetStatus("已放置标识，位置已锁定；长按标识可取消重放", Color.gray);
                 return;
             }
-            if (placer.TryPlace(pos, fingerId))
+            if (placer.TryPlace(pos, fingerId, out PlaceFail fail))
+            {
                 SetStatus("已放置标识（黄色）；确认后提交，或长按标识取消", Color.gray);
+                return;
+            }
+
+            // 放置失败不再静默（用户反馈"点了没反应"的根源）：把失败原因翻译成可见提示。
+            // OverUi 除外——点在按钮/输入框上属正常 UI 交互，静默即可。
+            switch (fail)
+            {
+                case PlaceFail.NoPlaneHit:
+                    SetStatus("此处未识别到平面：请对准青色识别区域的内部再点一次（别点到区域外）", Color.yellow);
+                    break;
+                case PlaceFail.NoUsablePlane:
+                    SetStatus("该平面还没稳定：请缓慢画弧移动手机继续扫描，再点其内部放置", Color.yellow);
+                    break;
+                case PlaceFail.AlreadyPlaced:
+                    SetStatus("已放置标识，位置已锁定；长按标识可取消重放", Color.gray);
+                    break;
+            }
         }
 
         /// <summary>长按标记 → 弹确认框取消（v1.3：长按弹窗显示取消标识）。</summary>
