@@ -7,6 +7,8 @@ type Config struct {
 	DBDriver      string
 	DBPath        string
 	AllowedOrigin string
+	// JWTSecret A1 登录令牌签名密钥：生产必须通过环境变量注入并定期轮换。
+	JWTSecret string
 }
 
 // Load 只从环境变量读取配置，默认值面向本地开发。
@@ -16,6 +18,7 @@ func Load() Config {
 		DBDriver:      getEnv("DB_DRIVER", "sqlite"),
 		DBPath:        getEnv("DB_PATH", "data/issues.db"),
 		AllowedOrigin: getEnv("ALLOWED_ORIGIN", "http://localhost:5173"),
+		JWTSecret:     getEnv("JWT_SECRET", "park-inspect-dev-secret-change-me"),
 	}
 }
 

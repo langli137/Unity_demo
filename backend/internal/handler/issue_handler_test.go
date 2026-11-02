@@ -6,20 +6,34 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"park-inspect/internal/auth"
 	"park-inspect/internal/repository/mem"
 	"park-inspect/internal/service"
 )
 
+const testJWTSecret = "test-secret"
+
 func newTestRouter() http.Handler {
 	svc := service.NewIssueService(mem.New())
-	return NewRouter(NewIssueHandler(svc), "http://localhost:5173")
+	authSvc := service.NewAuthService(mem.NewUserRepo(), testJWTSecret)
+	return NewRouter(NewIssueHandler(svc), NewAuthHandler(authSvc), testJWTSecret, "http://localhost:5173")
+}
+
+// testToken 签发测试用 admin 令牌（A1 后所有业务端点都要求登录）。
+func testToken(t *testing.T) string {
+	t.Helper()
+	return auth.Sign(testJWTSecret, auth.Claims{
+		Sub: "admin", Role: "admin", Exp: time.Now().Add(time.Hour).Unix(),
+	})
 }
 
 func doJSON(t *testing.T, router http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testToken(t))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec

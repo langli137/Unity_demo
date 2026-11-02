@@ -22,8 +22,18 @@ func main() {
 	}
 	defer repo.Close()
 
-	svc := service.NewIssueService(repo)
-	router := handler.NewRouter(handler.NewIssueHandler(svc), cfg.AllowedOrigin)
+	db := repo.ExposeDB()
+	userRepo := sqlite.NewUserRepo(db)
+
+	issueSvc := service.NewIssueService(repo)
+	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+
+	router := handler.NewRouter(
+		handler.NewIssueHandler(issueSvc),
+		handler.NewAuthHandler(authSvc),
+		cfg.JWTSecret,
+		cfg.AllowedOrigin,
+	)
 
 	log.Printf("server listening on :%s (driver=%s)", cfg.Port, cfg.DBDriver)
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil && !errors.Is(err, http.ErrServerClosed) {

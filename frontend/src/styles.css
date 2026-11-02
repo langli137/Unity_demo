@@ -230,3 +230,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .edit-form { grid-template-columns: 1fr; }
   .detail { grid-template-columns: 80px 1fr; }
 }
+
+/* ===== v1.3 新增：登录 / 顶栏 ===== */
+
+/* 登录页 */
+.login-card { max-width: 440px; margin: 64px auto; text-align: center; }
+.login-card h1 { margin-bottom: 4px; }
+.login-sub { color: var(--color-text-muted); margin-top: 0; }
+.login-card .edit-form { text-align: left; }
+.login-hint { font-size: 12px; color: var(--color-text-muted); margin-bottom: 0; }
+
+/* 顶栏（登录态信息 + 退出） */
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.topbar-user { font-size: 13px; color: var(--color-text-muted); }

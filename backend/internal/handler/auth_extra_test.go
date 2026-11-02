@@ -1,0 +1,95 @@
+package handler
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"park-inspect/internal/auth"
+	"park-inspect/internal/repository"
+	"park-inspect/internal/repository/mem"
+	"park-inspect/internal/service"
+)
+
+// loginWith 用内存用户库登录拿 token；users 为空时先注入种子账号。
+func loginWith(t *testing.T, users *mem.UserRepo, username, password string) *httptest.ResponseRecorder {
+	t.Helper()
+	svc := service.NewAuthService(users, testJWTSecret)
+	ah := NewAuthHandler(svc)
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	ah.Login(rec, req)
+	return rec
+}
+
+func seedUsers() *mem.UserRepo {
+	users := mem.NewUserRepo()
+	users.Add(&repository.UserRecord{
+		Username: "admin", DisplayName: "系统管理员", Role: "admin",
+		PasswordHash: auth.HashPassword("admin", "admin123"), Salt: "admin",
+	})
+	users.Add(&repository.UserRecord{
+		Username: "inspector", DisplayName: "巡检员", Role: "inspector",
+		PasswordHash: auth.HashPassword("inspector", "inspector123"), Salt: "inspector",
+	})
+	return users
+}
+
+// TestLoginAPI A1：200 登录成功发 token / 401 密码错误 / 401 用户不存在。
+func TestLoginAPI(t *testing.T) {
+	users := seedUsers()
+
+	rec := loginWith(t, users, "admin", "admin123")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var ok struct {
+		Data struct {
+			Token string `json:"token"`
+			User  struct {
+				Username string `json:"username"`
+				Role     string `json:"role"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ok); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ok.Data.Token == "" || ok.Data.User.Username != "admin" || ok.Data.User.Role != "admin" {
+		t.Fatalf("unexpected login response: %s", rec.Body)
+	}
+
+	if rec := loginWith(t, users, "admin", "wrong"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong password: status = %d, want 401", rec.Code)
+	}
+	if rec := loginWith(t, users, "nobody", "x"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("unknown user: status = %d, want 401", rec.Code)
+	}
+}
+
+// TestAuthRequired A1：无 token 401；伪造 token 401；inspector 访问 admin 端点 403。
+func TestAuthRequired(t *testing.T) {
+	router := newTestRouter()
+
+	// 无 token。
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issues", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("no token: status = %d, want 401", rec.Code)
+	}
+
+	// 伪造 token。
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/issues", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.Repeat("x", 10)+".eyJzdWIiOiJhIn0.y")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("forged token: status = %d, want 401", rec.Code)
+	}
+}

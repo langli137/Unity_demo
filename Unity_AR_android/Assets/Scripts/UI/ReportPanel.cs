@@ -16,6 +16,8 @@ namespace ParkInspect.UI
     /// - 平面检测有明确时限：正常 5~20 秒，超过 DetectTimeoutSeconds（30 秒）判定超时
     ///   并给出环境建议，不再无限显示"已等待 X 秒"；
     /// - 经 IssueReportService 提交，成功/失败都显示可见提示（FR-U-07）。
+    /// v1.4 新增：
+    /// - A1 启动自动登录（Inspector 配置账号），登录后上报人自动填充；
     /// 分类不采集（D6：缺省 other）；后端地址在 Inspector 的 baseUrl 配置（真机填局域网 IP）。
     /// </summary>
     public class ReportPanel : MonoBehaviour
@@ -39,6 +41,11 @@ namespace ParkInspect.UI
         [Header("网络")]
         [SerializeField] string baseUrl = "http://localhost:8083";
 
+        [Header("登录（A1：自动登录 + 上报人自动填充）")]
+        [SerializeField] bool autoLogin = true;
+        [SerializeField] string autoLoginUsername = "inspector";
+        [SerializeField] string autoLoginPassword = "inspector123";
+
         // 下拉选项索引 → 枚举值，与 ApplyPriorityOptions 的选项顺序一一对应（高/中/低）。
         static readonly string[] Priorities = { "high", "medium", "low" };
         // 标识框边长（米），与 ApplyMarkerSizeOptions 的选项顺序一一对应（小/中/大）。
@@ -54,9 +61,16 @@ namespace ParkInspect.UI
         const float LongPressPixelRadius = 120f;
 
         IssueReportService service;
+        ApiClient api;                 // A1/B6/B5 复用：登录、照片上传、列表拉取都走同一客户端
         Coroutine running;
+        Coroutine loginRoutine;
         float detectStartTime;   // 平面检测等待起点
         float planeFoundTime = -1f; // 首次检测到平面的时刻，-1 表示尚未检测到
+
+        // A1 登录态（登录成功后 ApiClient.Token 自动携带）。
+        bool loggedIn;
+        string loginDisplayName = "";
+        string loginError;
 
         // 长按取消状态机：手指按下累计时长 + 是否已弹出确认框。
         float longPressTimer;
@@ -73,7 +87,8 @@ namespace ParkInspect.UI
         void Awake()
         {
             ValidateReferences();
-            service = new IssueReportService(new ApiClient(baseUrl));
+            api = new ApiClient(baseUrl);
+            service = new IssueReportService(api);
             if (submitButton != null)
                 submitButton.onClick.AddListener(OnClickSubmit);
             if (cancelButton != null)
@@ -108,6 +123,41 @@ namespace ParkInspect.UI
             ApplyMarkerSizeOptions();
             SetStatus("", null);
             detectStartTime = Time.realtimeSinceStartup;
+
+            // A1 自动登录：登录成功后上报人自动填充；失败不阻断上报（未登录提交会被后端 401 拒绝并可见提示）。
+            if (autoLogin && loginRoutine == null)
+                loginRoutine = StartCoroutine(LoginRoutine());
+        }
+
+        /// <summary>
+        /// A1 自动登录协程：用 Inspector 配置的账号换 token；成功后自动填充上报人。
+        /// </summary>
+        IEnumerator LoginRoutine()
+        {
+            loginError = null;
+            yield return api.Login(autoLoginUsername, autoLoginPassword, (code, message, data) =>
+            {
+                if (code == 0 && data != null && !string.IsNullOrEmpty(data.token))
+                {
+                    loggedIn = true;
+                    loginDisplayName = data.user != null && !string.IsNullOrEmpty(data.user.displayName)
+                        ? data.user.displayName
+                        : autoLoginUsername;
+                    // 上报人自动填充：仅在输入框为空时填充，不覆盖用户已填内容。
+                    if (reporterInput != null && string.IsNullOrEmpty(reporterInput.text))
+                        reporterInput.text = loginDisplayName;
+                    SetStatus("已登录：" + loginDisplayName, Color.green);
+                    Debug.Log("[ReportPanel] 自动登录成功：" + loginDisplayName);
+                }
+                else
+                {
+                    loggedIn = false;
+                    loginError = string.IsNullOrEmpty(message) ? "登录失败（code=" + code + "）" : message;
+                    SetStatus("自动登录失败：" + loginError + "（仍可填写表单，提交时会被拒绝）", Color.red);
+                    Debug.LogWarning("[ReportPanel] 自动登录失败：" + loginError);
+                }
+            });
+            loginRoutine = null;
         }
 
         void Update()
