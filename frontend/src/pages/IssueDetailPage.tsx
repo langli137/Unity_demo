@@ -2,6 +2,7 @@
 // 三态任意互转合法（v1.1 Q1）；409 一定提示并刷新。
 // 编辑范围 = 标题/描述/分类/优先级/上报人；状态走上方状态按钮，AR 定位字段只读
 //（由 AR 上报时一次性写入，管理端不改）。表单复用 components/IssueForm。
+// v1.3：A4 删除（admin）。
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { useIssue } from '../hooks/useIssue'
@@ -11,6 +12,8 @@ import { StatusBadge } from '../components/StatusBadge'
 import { IssueForm, type IssueFormValue } from '../components/IssueForm'
 import type { Status } from '../types/issue'
 import { CATEGORY_LABELS, PRIORITY_LABELS } from '../types/issue'
+import { deleteIssue } from '../api/issues'
+import { getStoredUser, isAdmin } from '../api/auth'
 
 interface Props {
   id: string
@@ -33,6 +36,9 @@ export function IssueDetailPage({ id, onBack }: Props) {
   // 编辑模式开关 + 表单草稿；进入编辑时以当前 issue 值填充。
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<IssueFormValue>(EMPTY_DRAFT)
+  // A4 删除。
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (issue) {
@@ -82,6 +88,21 @@ export function IssueDetailPage({ id, onBack }: Props) {
       await refresh()
     }
     // 失败留在表单内，错误信息由 saveError 透出，用户可修正后重试。
+  }
+
+  // A4 删除（admin）：二次确认后删除并返回列表。
+  const handleDelete = async () => {
+    if (!window.confirm('确定删除该问题？删除后不可恢复。')) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteIssue(id)
+      onBack()
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   if (loading) return <p className="loading">加载中…</p>
@@ -164,7 +185,17 @@ export function IssueDetailPage({ id, onBack }: Props) {
             <button className="btn btn-primary" onClick={enterEdit}>
               编辑问题
             </button>
+            {isAdmin(getStoredUser()) && (
+              <button
+                className="btn btn-danger"
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+              >
+                {deleting ? '删除中…' : '删除问题'}
+              </button>
+            )}
           </div>
+          {deleteError && <p className="error">{deleteError}</p>}
         </>
       )}
 

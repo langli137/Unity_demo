@@ -108,3 +108,14 @@ func (r *IssueRepo) UpdateIssueFields(_ context.Context, id, title, description 
 	issue.UpdatedAt = millisToTime(updatedAt)
 	return true, nil
 }
+
+// Delete 硬删除（A4），照片由 mem.PhotoRepo 独立管理（单测各自覆盖）。
+func (r *IssueRepo) Delete(_ context.Context, id string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.issues[id]; !ok {
+		return false, nil
+	}
+	delete(r.issues, id)
+	return true, nil
+}

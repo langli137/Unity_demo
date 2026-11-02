@@ -55,3 +55,8 @@ export interface UpdateIssueInput {
 export function updateIssue(id: string, input: UpdateIssueInput): Promise<Issue> {
   return http.patch<Issue>(`/api/v1/issues/${encodeURIComponent(id)}`, input)
 }
+
+// A4 删除：DELETE /api/v1/issues/{id}（后端仅 admin 放行，前端再按角色隐藏入口）。
+export function deleteIssue(id: string): Promise<void> {
+  return http.del<void>(`/api/v1/issues/${encodeURIComponent(id)}`)
+}

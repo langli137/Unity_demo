@@ -149,6 +149,19 @@ func (r *IssueRepo) UpdateIssueFields(ctx context.Context, id, title, descriptio
 	return n > 0, nil
 }
 
+// Delete 硬删除（A4）。
+func (r *IssueRepo) Delete(ctx context.Context, id string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }

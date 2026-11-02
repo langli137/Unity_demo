@@ -231,7 +231,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .detail { grid-template-columns: 80px 1fr; }
 }
 
-/* ===== v1.3 新增：登录 / 顶栏 ===== */
+/* ===== v1.3 新增：登录 / 顶栏 / 删除 ===== */
 
 /* 登录页 */
 .login-card { max-width: 440px; margin: 64px auto; text-align: center; }
@@ -249,3 +249,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: 12px;
 }
 .topbar-user { font-size: 13px; color: var(--color-text-muted); }
+
+/* 删除按钮（危险操作红） */
+.btn-danger {
+  background: #fff;
+  border-color: #dc2626;
+  color: #dc2626;
+}
+.btn-danger:hover:not(:disabled) { background: #fef2f2; border-color: #b91c1c; }

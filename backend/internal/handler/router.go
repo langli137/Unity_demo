@@ -31,6 +31,8 @@ func NewRouter(h *IssueHandler, ah *AuthHandler, jwtSecret, allowedOrigin string
 	// 两条 PATCH 互不冲突：/status 命中更长路径规则；短路径 /{id} 为字段编辑。
 	mux.Handle("PATCH /api/v1/issues/{id}", authed(model.RoleInspector, h.UpdateIssue))
 	mux.Handle("PATCH /api/v1/issues/{id}/status", authed(model.RoleInspector, h.UpdateIssueStatus))
+	// 仅 admin：删除。
+	mux.Handle("DELETE /api/v1/issues/{id}", authed(model.RoleAdmin, h.DeleteIssue))
 
 	var handler http.Handler = mux
 	handler = middleware.CORS(allowedOrigin, handler)

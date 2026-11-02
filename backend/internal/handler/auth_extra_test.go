@@ -92,4 +92,53 @@ func TestAuthRequired(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("forged token: status = %d, want 401", rec.Code)
 	}
+
+	// inspector 删除 → 403（权限不足）。
+	inspTok := auth.Sign(testJWTSecret, auth.Claims{
+		Sub: "inspector", Role: "inspector", Exp: time.Now().Add(time.Hour).Unix(),
+	})
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/issues/some-id", nil)
+	req.Header.Set("Authorization", "Bearer "+inspTok)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("inspector delete: status = %d, want 403", rec.Code)
+	}
+}
+
+// TestDeleteIssueAPI A4：200 删除成功 / 404 不存在 / 删除后 404。
+func TestDeleteIssueAPI(t *testing.T) {
+	router := newTestRouter()
+
+	// 先创建一条。
+	rec := doJSON(t, router, http.MethodPost, "/api/v1/issues", `{
+		"title":"待删问题","category":"other","priority":"low",
+		"position":{"x":0,"y":0,"z":0},"anchor":{"planeId":""}
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created.Data.ID
+
+	// 200 删除。
+	rec = doJSON(t, router, http.MethodDelete, "/api/v1/issues/"+id, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	// 删除后再查 404。
+	rec = doJSON(t, router, http.MethodGet, "/api/v1/issues/"+id, "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("after delete: status = %d, want 404", rec.Code)
+	}
+	// 重复删除 404。
+	rec = doJSON(t, router, http.MethodDelete, "/api/v1/issues/"+id, "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("double delete: status = %d, want 404", rec.Code)
+	}
 }

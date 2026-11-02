@@ -30,4 +30,7 @@ type IssueRepository interface {
 	// AR 与状态机字段。返回 updated=false 表示记录不存在。字段编辑无乐观锁（后写覆盖），
 	// 409 语义保持"仅状态并发冲突"不扩大。
 	UpdateIssueFields(ctx context.Context, id string, title, description string, category model.Category, priority model.Priority, reporterName string, updatedAt int64) (bool, error)
+	// Delete 硬删除（A4，仅 admin）。返回 deleted=false 表示记录不存在（service 映射 404）。
+	// 照片级联删除由各实现自行处理（sqlite 实现内同批删除）。
+	Delete(ctx context.Context, id string) (deleted bool, err error)
 }
