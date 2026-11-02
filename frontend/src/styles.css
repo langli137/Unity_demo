@@ -231,7 +231,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .detail { grid-template-columns: 80px 1fr; }
 }
 
-/* ===== v1.3 新增：登录 / 顶栏 / 删除 / 照片 ===== */
+/* ===== v1.3 新增：登录 / 顶栏 / 删除 / 建议 / 照片 ===== */
 
 /* 登录页 */
 .login-card { max-width: 440px; margin: 64px auto; text-align: center; }
@@ -257,6 +257,30 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   color: #dc2626;
 }
 .btn-danger:hover:not(:disabled) { background: #fef2f2; border-color: #b91c1c; }
+
+/* B7 智能建议 */
+.suggest-field {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.btn-suggest {
+  border-style: dashed;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.btn-suggest:hover:not(:disabled) { background: #eef2ff; }
+.suggest-hint { font-size: 13px; color: var(--color-text-muted); }
+.btn-apply {
+  margin-left: 8px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
 
 /* B6 详情照片 */
 .issue-photo {

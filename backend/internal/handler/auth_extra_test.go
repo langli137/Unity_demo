@@ -143,6 +143,34 @@ func TestDeleteIssueAPI(t *testing.T) {
 	}
 }
 
+// TestSuggestPriorityAPI B7：高危关键词 → high；无命中 → medium 兜底。
+func TestSuggestPriorityAPI(t *testing.T) {
+	router := newTestRouter()
+
+	rec := doJSON(t, router, http.MethodPost, "/api/v1/issues/suggest-priority",
+		`{"title":"配电箱漏电","description":"箱体发热有焦味"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("suggest: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var res struct {
+		Data struct {
+			Priority string   `json:"priority"`
+			Matched  []string `json:"matched"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if res.Data.Priority != "high" || len(res.Data.Matched) == 0 {
+		t.Errorf("want high with matched keywords, got: %s", rec.Body)
+	}
+
+	rec = doJSON(t, router, http.MethodPost, "/api/v1/issues/suggest-priority",
+		`{"title":"地面有污渍","description":""}`)
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if res.Data.Priority != "low" {
+		t.Errorf("low keyword: want low, got: %s", rec.Body)
+	}
+}
+
 // TestPhotoRoundtrip B6：上传 → HasPhoto 可见 → 下载字节一致；不存在的问题 404。
 func TestPhotoRoundtrip(t *testing.T) {
 	users := seedUsers()

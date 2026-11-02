@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"park-inspect/internal/model"
 	"park-inspect/internal/repository"
@@ -64,4 +65,78 @@ func (s *IssueService) HasIssuePhoto(ctx context.Context, id string) (bool, erro
 		return false, nil
 	}
 	return s.photos.HasPhoto(ctx, id)
+}
+
+// ---------- B7 智能优先级建议（纯规则引擎，无外部依赖） ----------
+
+// priorityRule 关键词 → 优先级规则：按 severity 从高到低匹配，命中即返回。
+type priorityRule struct {
+	severity int // 2=high 1=medium 0=low（取最高命中）
+	priority model.Priority
+	keywords []string
+}
+
+// 规则来源：巡检业务常识（结构安全/人身风险=high，功能缺陷=medium，外观=low）。
+// 关键词表集中在一处，业务方增删只改这里。
+var priorityRules = []priorityRule{
+	{2, model.PriorityHigh, []string{
+		"坍塌", "倒塌", "断裂", "裂开", "漏电", "触电", "起火", "冒烟", "燃气", "浓烟",
+		"承重", "钢筋外露", "沉降", "倾斜", "危房", "爆炸", "高处坠落", "基坑",
+	}},
+	{1, model.PriorityMedium, []string{
+		"裂缝", "渗水", "漏水", "破损", "松动", "脱落", "锈蚀", "变形", "异响",
+		"缺损", "玻璃碎", "护栏", "疏散", "应急灯", "灭火器", "堵塞", "翘起",
+	}},
+	{0, model.PriorityLow, []string{
+		"污渍", "褪色", "掉漆", "划痕", "杂草", "垃圾", "标识不清", "歪斜",
+		"积尘", "渗灰", "轻微", "美观",
+	}},
+}
+
+// SuggestPriorityResult 建议产物：命中关键词一并返回，便于前端解释"为什么建议这个"。
+type SuggestPriorityResult struct {
+	Priority model.Priority `json:"priority"`
+	Reason   string         `json:"reason"`
+	Matched  []string       `json:"matched"`
+}
+
+// SuggestPriority 规则引擎：对 标题+描述 分词（子串匹配），取命中规则中 severity 最高者。
+// 无任何命中 → medium 兜底（宁可提醒多看一眼），reason 说明"未命中关键词"。
+func (s *IssueService) SuggestPriority(title, description string) SuggestPriorityResult {
+	text := strings.ToLower(title + " " + description)
+	best := -1
+	var matched []string
+	var prio model.Priority
+
+	for _, rule := range priorityRules {
+		var hit []string
+		for _, kw := range rule.keywords {
+			if strings.Contains(text, kw) {
+				hit = append(hit, kw)
+			}
+		}
+		if len(hit) > 0 && rule.severity > best {
+			best = rule.severity
+			prio = rule.priority
+			matched = hit
+		}
+	}
+
+	if best < 0 {
+		return SuggestPriorityResult{
+			Priority: model.PriorityMedium,
+			Reason:   "未命中风险关键词，按中优先级建议，请人工确认",
+			Matched:  nil,
+		}
+	}
+	reason := "命中关键词：" + strings.Join(matched, "、")
+	switch prio {
+	case model.PriorityHigh:
+		reason += "（涉及结构/人身安全风险）"
+	case model.PriorityMedium:
+		reason += "（影响使用功能）"
+	default:
+		reason += "（外观/轻微问题）"
+	}
+	return SuggestPriorityResult{Priority: prio, Reason: reason, Matched: matched}
 }

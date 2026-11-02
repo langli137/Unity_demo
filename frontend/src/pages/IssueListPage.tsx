@@ -1,5 +1,6 @@
 // 问题列表页：筛选 + 分页 + 表格 + 10 秒轮询（轮询在 useIssues 内）。
 // v1.2：新增"新建问题"补录入口（AR 上报为主，管理端可补录漏报问题）。
+// v1.3：B7 新建表单接智能优先级建议。
 
 import { useState, type FormEvent } from 'react'
 import { FilterBar } from '../components/FilterBar'
@@ -7,6 +8,7 @@ import { IssueTable } from '../components/IssueTable'
 import { IssueForm, type IssueFormValue } from '../components/IssueForm'
 import { useIssues } from '../hooks/useIssues'
 import { useCreateIssue } from '../hooks/useCreateIssue'
+import { usePrioritySuggestion } from '../hooks/usePrioritySuggestion'
 
 const PAGE_SIZE = 20
 
@@ -22,6 +24,13 @@ export function IssueListPage({ onOpenDetail }: { onOpenDetail: (id: string) => 
   const { items, total, loading, error, filters, updateFilters, setPage, refresh } =
     useIssues()
   const { create, pending: creating, error: createError, clearError } = useCreateIssue()
+  const {
+    suggestion,
+    suggesting,
+    error: suggestError,
+    fetchSuggestion,
+    clear: clearSuggestion,
+  } = usePrioritySuggestion()
   const [creatingOpen, setCreatingOpen] = useState(false)
   const [draft, setDraft] = useState<IssueFormValue>(EMPTY_DRAFT)
 
@@ -29,8 +38,14 @@ export function IssueListPage({ onOpenDetail }: { onOpenDetail: (id: string) => 
 
   const openCreate = () => {
     clearError()
+    clearSuggestion()
     setDraft(EMPTY_DRAFT)
     setCreatingOpen(true)
+  }
+
+  // B7 新建表单的智能建议入口。
+  const handleSuggest = async () => {
+    await fetchSuggestion(draft.title, draft.description)
   }
 
   const handleCreate = async (e: FormEvent) => {
@@ -78,11 +93,16 @@ export function IssueListPage({ onOpenDetail }: { onOpenDetail: (id: string) => 
             onSubmit={(e) => void handleCreate(e)}
             onCancel={() => {
               clearError()
+              clearSuggestion()
               setCreatingOpen(false)
             }}
             pending={creating}
             error={createError}
             submitLabel="创建"
+            suggestion={suggestion}
+            suggesting={suggesting}
+            suggestError={suggestError}
+            onSuggest={() => void handleSuggest()}
           />
         </div>
       )}

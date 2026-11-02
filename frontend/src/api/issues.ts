@@ -61,6 +61,17 @@ export function deleteIssue(id: string): Promise<void> {
   return http.del<void>(`/api/v1/issues/${encodeURIComponent(id)}`)
 }
 
+// B7 智能优先级建议：纯规则引擎，返回建议优先级 + 命中关键词解释。
+export interface PrioritySuggestion {
+  priority: 'low' | 'medium' | 'high'
+  reason: string
+  matched: string[]
+}
+
+export function suggestPriority(title: string, description: string): Promise<PrioritySuggestion> {
+  return http.post<PrioritySuggestion>('/api/v1/issues/suggest-priority', { title, description })
+}
+
 // B6 照片地址（需带 Authorization，不能直接塞给 <img src>——详情页用 raw() 取 blob）。
 export function photoPath(id: string): string {
   return `/api/v1/issues/${encodeURIComponent(id)}/photo`

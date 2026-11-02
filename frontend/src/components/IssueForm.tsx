@@ -1,5 +1,6 @@
 // 共用问题表单（v1.2）：详情页"编辑"与列表页"新建"复用同一套两列布局。
 // 受控组件：值与变更全部由父级持有；本组件不发请求、不写业务判断。
+// v1.3（B7）：可选"智能建议优先级"入口——由父级驱动请求，本组件只展示与回填。
 
 import type { ChangeEvent, FormEvent } from 'react'
 import type { Category, Priority } from '../types/issue'
@@ -13,6 +14,12 @@ export interface IssueFormValue {
   reporterName: string
 }
 
+// B7 建议结果展示契约（来自 hooks/usePrioritySuggestion）。
+export interface PrioritySuggestionView {
+  priority: Priority
+  reason: string
+}
+
 interface Props {
   value: IssueFormValue
   onChange: (next: IssueFormValue) => void
@@ -21,6 +28,11 @@ interface Props {
   pending: boolean
   error?: string | null
   submitLabel?: string
+  // B7 智能优先级建议（可选；不传则不显示入口，保持纯表单）。
+  suggestion?: PrioritySuggestionView | null
+  suggesting?: boolean
+  suggestError?: string | null
+  onSuggest?: () => void
 }
 
 const CATEGORY_OPTIONS = Object.keys(CATEGORY_LABELS) as Category[]
@@ -34,6 +46,10 @@ export function IssueForm({
   pending,
   error,
   submitLabel = '保存',
+  suggestion,
+  suggesting,
+  suggestError,
+  onSuggest,
 }: Props) {
   const set = <K extends keyof IssueFormValue>(key: K, v: IssueFormValue[K]) =>
     onChange({ ...value, [key]: v })
@@ -80,6 +96,36 @@ export function IssueForm({
           ))}
         </select>
       </label>
+      {onSuggest && (
+        <div className="form-field suggest-field">
+          <button
+            type="button"
+            className="btn-suggest"
+            onClick={onSuggest}
+            disabled={suggesting}
+            title="按标题与描述中的风险关键词给出优先级建议"
+          >
+            {suggesting ? '分析中…' : '✨ 智能建议优先级'}
+          </button>
+          {suggestion && (
+            <span className="suggest-hint">
+              建议 <b className={`priority priority-${suggestion.priority}`}>
+                {PRIORITY_LABELS[suggestion.priority]}
+              </b>
+              {' '}— {suggestion.reason}
+              <button
+                type="button"
+                className="btn-apply"
+                onClick={() => set('priority', suggestion.priority)}
+                disabled={value.priority === suggestion.priority}
+              >
+                {value.priority === suggestion.priority ? '已采用' : '采用'}
+              </button>
+            </span>
+          )}
+          {suggestError && <span className="error">{suggestError}</span>}
+        </div>
+      )}
       <label className="form-field">
         <span>上报人</span>
         <input

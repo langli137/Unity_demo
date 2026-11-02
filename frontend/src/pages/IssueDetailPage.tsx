@@ -8,6 +8,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useIssue } from '../hooks/useIssue'
 import { useUpdateStatus } from '../hooks/useUpdateStatus'
 import { useUpdateIssue } from '../hooks/useUpdateIssue'
+import { usePrioritySuggestion } from '../hooks/usePrioritySuggestion'
 import { StatusBadge } from '../components/StatusBadge'
 import { IssueForm, type IssueFormValue } from '../components/IssueForm'
 import type { Status } from '../types/issue'
@@ -33,6 +34,13 @@ export function IssueDetailPage({ id, onBack }: Props) {
   const { issue, loading, error, refresh } = useIssue(id)
   const { change, pending, error: updateError } = useUpdateStatus()
   const { save, pending: saving, error: saveError, clearError } = useUpdateIssue()
+  const {
+    suggestion,
+    suggesting,
+    error: suggestError,
+    fetchSuggestion,
+    clear: clearSuggestion,
+  } = usePrioritySuggestion()
 
   // 编辑模式开关 + 表单草稿；进入编辑时以当前 issue 值填充。
   const [editing, setEditing] = useState(false)
@@ -90,6 +98,7 @@ export function IssueDetailPage({ id, onBack }: Props) {
 
   const enterEdit = () => {
     clearError()
+    clearSuggestion()
     setEditing(true)
   }
 
@@ -116,6 +125,11 @@ export function IssueDetailPage({ id, onBack }: Props) {
       await refresh()
     }
     // 失败留在表单内，错误信息由 saveError 透出，用户可修正后重试。
+  }
+
+  // B7 智能优先级建议：按当前草稿的标题+描述请求规则引擎，结果由表单展示，点"采用"回填。
+  const handleSuggest = async () => {
+    await fetchSuggestion(draft.title, draft.description)
   }
 
   // A4 删除（admin）：二次确认后删除并返回列表。
@@ -167,6 +181,10 @@ export function IssueDetailPage({ id, onBack }: Props) {
           onCancel={cancelEdit}
           pending={saving}
           error={saveError}
+          suggestion={suggestion}
+          suggesting={suggesting}
+          suggestError={suggestError}
+          onSuggest={() => void handleSuggest()}
         />
       ) : (
         <>

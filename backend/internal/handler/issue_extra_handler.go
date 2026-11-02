@@ -56,3 +56,27 @@ func (h *IssueHandler) GetPhoto(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }
+
+// ---------- B7 智能优先级建议 ----------
+
+type suggestPriorityRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type suggestPriorityResponse struct {
+	Priority model.Priority `json:"priority"`
+	Reason   string         `json:"reason"`
+	Matched  []string       `json:"matched"`
+}
+
+// SuggestPriority POST /api/v1/issues/suggest-priority：规则引擎建议，纯计算不落库。
+func (h *IssueHandler) SuggestPriority(w http.ResponseWriter, r *http.Request) {
+	var req suggestPriorityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	res := h.svc.SuggestPriority(req.Title, req.Description)
+	writeOK(w, suggestPriorityResponse{Priority: res.Priority, Reason: res.Reason, Matched: res.Matched})
+}
