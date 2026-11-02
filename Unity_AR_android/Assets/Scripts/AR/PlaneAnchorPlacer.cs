@@ -43,8 +43,13 @@ namespace ParkInspect.AR
         static readonly List<ARRaycastHit> Hits = new List<ARRaycastHit>();
         /// <summary>待提交标记颜色（黄）。</summary>
         static readonly Color PlacedColor = new Color(1f, 0.82f, 0.1f);
-        /// <summary>已提交标记颜色（红，用户要求：被提交的显示为红色标识）。</summary>
-        static readonly Color SubmittedColor = new Color(0.86f, 0.13f, 0.13f);
+        /// <summary>
+        /// A3 已提交/历史标记按优先级着色：high 红 / medium 黄 / low 蓝。
+        /// 高优先级仍为红（与 v1.3"提交转红"兼容——高优先级是最常见上报档位）。
+        /// </summary>
+        static readonly Color PriorityHighColor = new Color(0.86f, 0.13f, 0.13f);
+        static readonly Color PriorityMediumColor = new Color(1f, 0.82f, 0.1f);
+        static readonly Color PriorityLowColor = new Color(0.13f, 0.42f, 0.9f);
 
         /// <summary>
         /// 判定平面"可用"的最小尺寸（米，短边）。
@@ -187,16 +192,29 @@ namespace ParkInspect.AR
         }
 
         /// <summary>
-        /// 提交成功后调用：待提交标记转红并锁定为现场记录（Submitted），活动位清空可放置下一个。
-        /// 与 v1.2"成功即清标识"的差异：用户 v1.3 明确要求已提交的显示为红色标识留在现场。
+        /// 提交成功后调用：待提交标记按优先级着色（A3：high 红/medium 黄/low 蓝）
+        /// 并锁定为现场记录（Submitted），活动位清空可放置下一个。
+        /// 与 v1.2"成功即清标识"的差异：用户 v1.3 明确要求已提交的标识留在现场。
+        /// priority 非法/为空时退回红色（保持旧行为）。
         /// </summary>
-        public void MarkSubmitted()
+        public void MarkSubmitted(string priority)
         {
             if (activeMarker == null) return;
-            Tint(activeMarker, SubmittedColor);
+            Tint(activeMarker, PriorityColor(priority));
             submittedMarkers.Add(activeMarker);
             activeMarker = null;
             currentPlaneId = "";
+        }
+
+        /// <summary>A3 优先级 → 标记颜色映射（high/medium/low；未知值按 high 红处理）。</summary>
+        public static Color PriorityColor(string priority)
+        {
+            switch (priority)
+            {
+                case "low": return PriorityLowColor;
+                case "medium": return PriorityMediumColor;
+                default: return PriorityHighColor;
+            }
         }
 
         /// <summary>取消当前待提交标记（长按确认后调用，FR-U-08 补充）。</summary>

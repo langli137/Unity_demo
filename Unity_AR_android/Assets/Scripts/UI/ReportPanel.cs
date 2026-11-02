@@ -11,7 +11,7 @@ namespace ParkInspect.UI
     /// 上报面板（视图层，MonoBehaviour）：
     /// - 采集 标题（必填）/描述（可选）/优先级（low|medium|high 三枚举）（FR-U-04/05）；
     /// - 触摸转发给 PlaneAnchorPlacer 放置标记；点击 UI 时不放置（FR-U-08）；
-    /// - v1.3 交互：放置即锁定（误触不再移动）；提交成功标记转红色现场记录；
+    /// - v1.3 交互：放置即锁定（误触不再移动）；提交成功标记按优先级着色（A3）；
     ///   长按标记 0.8 秒弹确认框取消；同一时刻仅一个待提交标记；
     /// - 平面检测有明确时限：正常 5~20 秒，超过 DetectTimeoutSeconds（30 秒）判定超时
     ///   并给出环境建议，不再无限显示"已等待 X 秒"；
@@ -317,7 +317,7 @@ namespace ParkInspect.UI
 
             string msg = confirmTargetActive
                 ? "要取消这个待提交标识吗？\n取消后可重新点击平面放置"
-                : "要移除这个已提交（红色）标识吗？\n移除后现场将不再显示";
+                : "要移除这个已提交标识吗？\n移除后现场将不再显示";
             GUI.Label(new Rect(panel.x + 30, panel.y + 40, panel.width - 60, 180), msg, confirmLabelStyle);
 
             float btnW = (panel.width - 90) / 2f;
@@ -332,9 +332,9 @@ namespace ParkInspect.UI
                 }
                 else
                 {
-                    // 红色标记移除：TryGetMarkerNear 已确认命中的是 submitted 集合内对象。
+                    // 已提交标记移除：TryGetMarkerNear 已确认命中的是 submitted 集合内对象。
                     RemoveNearestSubmitted();
-                    SetStatus("已移除红色标识", Color.gray);
+                    SetStatus("已移除标识", Color.gray);
                 }
                 confirmShown = false;
             }
@@ -487,18 +487,18 @@ namespace ParkInspect.UI
             if (submitButton != null) submitButton.interactable = false;
             SetStatus("提交中…", Color.gray);
 
-            // 提交前快照：成功后把该标记转红（位置已随 draft 固化）。
+            // 提交前快照：成功后把该标记按优先级着色（位置已随 draft 固化）。
             yield return service.SubmitRoutine(draft, outcome =>
             {
                 if (outcome.Success)
                 {
-                    SetStatus("提交成功（id: " + outcome.IssueId + "）；标识已转红留档", Color.green);
+                    SetStatus("提交成功（id: " + outcome.IssueId + "）；标识已按优先级着色留档", Color.green);
                     if (titleInput != null) titleInput.text = "";
                     if (descriptionInput != null) descriptionInput.text = "";
-                    // v1.3 业务逻辑：提交成功 = 该标识从"待提交（黄）"转为"已提交（红）"现场记录，
+                    // v1.3 业务逻辑：提交成功 = 该标识锁定为现场记录（A3：红/黄/蓝对应高/中/低），
                     // 不再随手机移动/误触改变；待提交位清空，可继续放置下一个标识（一次一个）。
                     // 失败则保留黄色标识便于重试。
-                    if (placer != null) placer.MarkSubmitted();
+                    if (placer != null) placer.MarkSubmitted(draft.priority);
                 }
                 else
                 {
