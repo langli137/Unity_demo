@@ -106,7 +106,7 @@ namespace ParkInspect.EditorTools
             panelSo.FindProperty("statusText").objectReferenceValue = ui.status;
             panelSo.FindProperty("guidanceText").objectReferenceValue = ui.guidance;
             panelSo.FindProperty("placer").objectReferenceValue = placer;
-            panelSo.FindProperty("baseUrl").stringValue = "http://10.216.180.140:8083"; // 换网络后同步改为电脑当前局域网 IP（手机须与电脑同一网络）
+            panelSo.FindProperty("baseUrl").stringValue = "http://192.168.117.140:8083"; // 换网络后同步改为电脑当前局域网 IP（手机须与电脑同一网络）
             panelSo.ApplyModifiedPropertiesWithoutUndo();
 
             // ---------- 5. 保存 ----------
@@ -178,6 +178,8 @@ namespace ParkInspect.EditorTools
                 ui.guidance.alignment = TextAnchor.MiddleCenter;
                 ui.guidance.color = Color.white;
                 ui.guidance.horizontalOverflow = HorizontalWrapMode.Wrap;
+                // 纯展示文案不吃点击（P-029）：否则这条满宽横幅会把下方场景放置点击静默吞掉。
+                ui.guidance.raycastTarget = false;
                 SetRect(guidanceGo, canvas, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0.5f, 1f),
                     new Vector2(-SideMargin * 2, 260f), new Vector2(0, -100f));
             }
@@ -193,7 +195,13 @@ namespace ParkInspect.EditorTools
             panelRect.sizeDelta = new Vector2(0, FormHeight);
             panelRect.anchoredPosition = Vector2.zero;
             var panelImage = panelGo.GetComponent<Image>();
-            if (panelImage != null) panelImage.color = new Color(0f, 0f, 0f, 0.45f);
+            if (panelImage != null)
+            {
+                panelImage.color = new Color(0f, 0f, 0f, 0.45f);
+                // 半透明面板不吃点击（P-029）：相机画面透过面板可见，用户会直接点面板覆盖区里的裂缝；
+                // 拦截即静默失败（"点了没反应"）。真实控件各自拦截自己的矩形，防穿透不受影响。
+                panelImage.raycastTarget = false;
+            }
 
             float y = 16f;
 
@@ -261,6 +269,7 @@ namespace ParkInspect.EditorTools
                 ui.status.fontSize = 38;
                 ui.status.alignment = TextAnchor.MiddleLeft;
                 ui.status.color = Color.white;
+                ui.status.raycastTarget = false; // 纯展示文案不吃点击（P-029），与 GuidanceText 一致
                 SetRow(statusGo, panelRect, ref y, 70f);
             }
 

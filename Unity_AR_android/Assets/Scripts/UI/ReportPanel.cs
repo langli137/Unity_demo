@@ -271,19 +271,16 @@ namespace ParkInspect.UI
             if (confirmShown || historyOpen) return; // 弹窗/历史面板期间不响应放置
 
             Vector2 pos;
-            int fingerId;
             bool pressBegan;
             if (Input.touchCount > 0)
             {
                 Touch touch = Input.GetTouch(0);
                 pos = touch.position;
-                fingerId = touch.fingerId;
                 pressBegan = touch.phase == TouchPhase.Began;
             }
             else if (Input.GetMouseButtonDown(0))
             {
                 pos = Input.mousePosition;
-                fingerId = -1; // 编辑器/桌面调试路径：与触摸一致过 UI 防护。
                 pressBegan = true;
             }
             else return;
@@ -295,7 +292,7 @@ namespace ParkInspect.UI
                 SetStatus("已放置标识，位置已锁定；长按标识可取消重放", Color.gray);
                 return;
             }
-            if (placer.TryPlace(pos, fingerId, out PlaceFail fail))
+            if (placer.TryPlace(pos, out PlaceFail fail))
             {
                 // 明示放置方式：平面命中=精确；点云估算=降级，位置可能有偏差。
                 SetStatus(placer.LastPlacementOnPlane

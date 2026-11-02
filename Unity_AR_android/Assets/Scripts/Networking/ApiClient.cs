@@ -8,7 +8,7 @@ namespace ParkInspect.Networking
 {
     /// <summary>
     /// 统一 HTTP 客户端（FR-U-09）：所有请求仅经由此处发出，不散拼 HTTP。
-    /// - 超时 10 秒；网络失败自动重试 1 次。
+    /// - 超时 10 秒；网络失败自动重试 1 次（双地址兜底：局域网 IP → adb reverse localhost）。
     /// - 请求/响应走统一响应壳 {code,message,data}，code==0 成功。
     /// - 协议错误（4xx/5xx）不重试——后端明确拒绝时重试无意义，直接把 message 抛给 UI。
     /// - A1 登录：Login 取 token 后存入 Token，后续请求自动带 Authorization: Bearer。
@@ -20,6 +20,13 @@ namespace ParkInspect.Networking
         /// 后端基地址。真机须改为运行后端的局域网 IP（README 第 7 节），例如 http://192.168.1.50:8083。
         /// </summary>
         public string BaseUrl = "http://localhost:8083";
+
+        /// <summary>
+        /// 兜底基地址（P-029）：手机 USB 连接且执行过 adb reverse tcp:8083 tcp:8083 时，
+        /// localhost 直达电脑后端。主地址网络层失败时自动换本地址重试一次，
+        /// 使 IP 变动/换网络不再直接断连（总尝试次数仍为 MaxAttempts）。
+        /// </summary>
+        public const string FallbackBaseUrl = "http://localhost:8083";
 
         public const int TimeoutSeconds = 10;
         public const int MaxAttempts = 2; // 1 次原始请求 + 1 次重试
@@ -140,8 +147,10 @@ namespace ParkInspect.Networking
         }
 
         /// <summary>
-        /// 带重试的请求协程。重试仅针对网络层失败（连接超时/中断）；
+        /// 带重试的请求协程（JSON 路径）。重试仅针对网络层失败（连接超时/中断）；
         /// 服务器已应答（无论成功还是 4xx/5xx）都直接返回。
+        /// 双地址兜底（P-029）：第 1 次走主地址（局域网 IP），网络层失败后第 2 次换
+        /// 兜底地址（localhost，经 adb reverse 直达电脑后端）；两个地址皆失败才报网络错误。
         /// </summary>
         public System.Collections.IEnumerator Send(
             string method, string path, string json, Action<int, string, IssueResult> onDone)
@@ -155,15 +164,16 @@ namespace ParkInspect.Networking
 
             if (networkFail)
             {
-                onDone?.Invoke(-1, "网络请求失败（超时或无法连接服务器），请检查后端地址与网络", null);
+                onDone?.Invoke(-1, "网络请求失败（已尝试 " + BaseUrl + " 与 " + FallbackBaseUrl +
+                    " 均超时或无法连接），请检查后端地址与网络", null);
                 yield break;
             }
             Parse(text, status, onDone);
         }
 
         /// <summary>
-        /// 底层请求（带重试）。回调 (httpStatus, body, networkFail)：
-        /// networkFail=true 表示网络层失败（status/body 无意义）；
+        /// 底层请求（带双地址重试）。回调 (httpStatus, body, networkFail)：
+        /// networkFail=true 表示两个地址都在网络层失败（status/body 无意义）；
         /// 否则服务器已应答，status 为 HTTP 状态码、text 为响应体。
         /// </summary>
         System.Collections.IEnumerator Request(
@@ -172,7 +182,7 @@ namespace ParkInspect.Networking
         {
             for (int attempt = 1; attempt <= MaxAttempts; attempt++)
             {
-                string url = BaseUrl + path;
+                string url = (attempt == 1 ? BaseUrl : FallbackBaseUrl) + path;
                 using (var req = new UnityWebRequest(url, method))
                 {
                     if (body != null)

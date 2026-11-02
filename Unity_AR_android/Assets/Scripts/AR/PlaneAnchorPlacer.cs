@@ -116,26 +116,23 @@ namespace ParkInspect.AR
         }
 
         /// <summary>
-        /// 尝试在屏幕位置放置标记（v1.3：仅放置，不再移动已有标记）。
-        /// 已有待提交标记时返回 false（一次只能一个），ReportPanel 会提示长按取消。
-        /// pointerId：触摸传 touch.fingerId，鼠标传 -1（编辑器）。
-        /// </summary>
-        public bool TryPlace(Vector2 screenPos, int pointerId = -1)
-        {
-            return TryPlace(screenPos, pointerId, out _);
-        }
-
-        /// <summary>
         /// 尝试放置标记，并通过 fail 输出失败原因——让 ReportPanel 把"点了没反应"变成可见反馈。
         /// </summary>
-        public bool TryPlace(Vector2 screenPos, int pointerId, out PlaceFail fail)
+        public bool TryPlace(Vector2 screenPos, out PlaceFail fail)
         {
             // 一次只能一个待提交标记：锁定后误触/再次点击都不会改变位置。
             if (activeMarker != null) { fail = PlaceFail.AlreadyPlaced; return false; }
 
-            // UI 穿透防护（FR-U-08）：点在 UI 上直接忽略，避免误放标记。
-            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(pointerId))
-            { fail = PlaceFail.OverUi; return false; }
+            // UI 穿透防护（FR-U-08）：点在真实控件（按钮/输入框/下拉）上直接忽略，避免误放标记。
+            // 用 RaycastAll 手动判定而非 IsPointerOverGameObject(fingerId)：后者在 Android 触摸路径
+            // 有误报 true 的已知问题，会把场景点击静默吞掉（用户反馈"点击裂缝没反应"，P-029）。
+            if (EventSystem.current != null)
+            {
+                var uiHits = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(
+                    new PointerEventData(EventSystem.current) { position = screenPos }, uiHits);
+                if (uiHits.Count > 0) { fail = PlaceFail.OverUi; return false; }
+            }
 
             if (raycastManager == null) { fail = PlaceFail.NoPlaneHit; return false; }
 
