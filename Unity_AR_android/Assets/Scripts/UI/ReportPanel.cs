@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,6 +19,7 @@ namespace ParkInspect.UI
     /// - 经 IssueReportService 提交，成功/失败都显示可见提示（FR-U-07）。
     /// v1.4 新增：
     /// - A1 启动自动登录（Inspector 配置账号），登录后上报人自动填充；
+    /// - B5 网络失败的草稿落盘离线队列，网络恢复后自动重发；
     /// - A2 历史问题列表（OnGUI 面板）+ 按坐标回显优先级着色标记。
     /// 分类不采集（D6：缺省 other）；后端地址在 Inspector 的 baseUrl 配置（真机填局域网 IP）。
     /// </summary>
@@ -60,11 +62,15 @@ namespace ParkInspect.UI
         const float LongPressSeconds = 0.8f;
         /// <summary>长按命中判定：手指距标记投影的屏幕像素半径。</summary>
         const float LongPressPixelRadius = 120f;
+        /// <summary>B5 离线队列重发检查间隔（秒）。</summary>
+        const float OfflineRetrySeconds = 10f;
 
         IssueReportService service;
         ApiClient api;                 // A1/B6/B5 复用：登录、照片上传、列表拉取都走同一客户端
+        OfflineQueue offlineQueue;     // B5 离线暂存队列
         Coroutine running;
         Coroutine loginRoutine;
+        Coroutine flushRoutine;
         Coroutine historyRoutine;
         float detectStartTime;   // 平面检测等待起点
         float planeFoundTime = -1f; // 首次检测到平面的时刻，-1 表示尚未检测到
@@ -102,6 +108,7 @@ namespace ParkInspect.UI
             ValidateReferences();
             api = new ApiClient(baseUrl);
             service = new IssueReportService(api);
+            offlineQueue = new OfflineQueue();
             if (submitButton != null)
                 submitButton.onClick.AddListener(OnClickSubmit);
             if (cancelButton != null)
@@ -137,9 +144,16 @@ namespace ParkInspect.UI
             SetStatus("", null);
             detectStartTime = Time.realtimeSinceStartup;
 
+            int queued = offlineQueue.Count();
+            if (queued > 0)
+                SetStatus("检测到 " + queued + " 条离线暂存记录，网络恢复后将自动重发", Color.gray);
+
             // A1 自动登录：登录成功后上报人自动填充；失败不阻断上报（未登录提交会被后端 401 拒绝并可见提示）。
             if (autoLogin && loginRoutine == null)
                 loginRoutine = StartCoroutine(LoginRoutine());
+            // B5 离线队列定期重发（每 OfflineRetrySeconds 秒尝试一次，队列空时跳过）。
+            if (flushRoutine == null)
+                flushRoutine = StartCoroutine(FlushOfflineRoutine());
         }
 
         /// <summary>
@@ -171,6 +185,57 @@ namespace ParkInspect.UI
                 }
             });
             loginRoutine = null;
+        }
+
+        /// <summary>
+        /// B5 离线队列重发循环：每 OfflineRetrySeconds 秒检查一次队列，
+        /// 有积压且当前空闲（无提交进行中）时逐条重发；网络仍失败则等下一轮。
+        /// </summary>
+        IEnumerator FlushOfflineRoutine()
+        {
+            var wait = new WaitForSecondsRealtime(OfflineRetrySeconds);
+            while (true)
+            {
+                yield return wait;
+                if (!loggedIn) continue;                 // 未登录：等登录成功后再重发（401 无意义）
+                if (running != null || service.Submitting) continue; // 正在提交：不并发挤兑
+                if (!offlineQueue.TryPeek(out OfflineQueue.Entry entry, out IssueDraft draft)) continue;
+
+                SetStatus("网络恢复，正在重发离线暂存（剩 " + offlineQueue.Count() + " 条）…", Color.gray);
+                bool done = false;
+                bool ok = false;
+                bool netFail = false;
+                string msg = "";
+                string issueId = null;
+                yield return service.SubmitRoutine(draft, outcome =>
+                {
+                    ok = outcome.Success;
+                    netFail = outcome.NetworkFailure;
+                    msg = outcome.Message;
+                    issueId = outcome.IssueId;
+                    done = true;
+                });
+
+                if (!done) continue;
+                if (ok)
+                {
+                    offlineQueue.Remove(entry.localId);
+                    SetStatus("离线暂存已重发成功（id: " + issueId + "），队列剩 " +
+                        offlineQueue.Count() + " 条", Color.green);
+                }
+                else if (netFail)
+                {
+                    // 仍是网络失败：保留队列，等下一轮。
+                    SetStatus("网络仍不可用，离线暂存保留（" + offlineQueue.Count() +
+                        " 条），恢复后自动重发", Color.yellow);
+                }
+                else
+                {
+                    // 后端明确拒绝（如 401/400）：该条目重发也不会成功，出队避免死循环，提示用户。
+                    offlineQueue.Remove(entry.localId);
+                    SetStatus("离线暂存重发被拒绝，已丢弃该条：" + msg, Color.red);
+                }
+            }
         }
 
         void Update()
@@ -683,26 +748,45 @@ namespace ParkInspect.UI
             SetStatus("提交中…", Color.gray);
 
             // 提交前快照：成功后把该标记按优先级着色（位置已随 draft 固化）。
+            IssueReportService.SubmitOutcome finalOutcome = default;
+            bool finished = false;
             yield return service.SubmitRoutine(draft, outcome =>
             {
-                if (outcome.Success)
-                {
-                    SetStatus("提交成功（id: " + outcome.IssueId + "）；标识已按优先级着色留档", Color.green);
-                    if (titleInput != null) titleInput.text = "";
-                    if (descriptionInput != null) descriptionInput.text = "";
-                    // v1.3 业务逻辑：提交成功 = 该标识锁定为现场记录（A3：红/黄/蓝对应高/中/低），
-                    // 不再随手机移动/误触改变；待提交位清空，可继续放置下一个标识（一次一个）。
-                    // 失败则保留黄色标识便于重试。
-                    if (placer != null) placer.MarkSubmitted(draft.priority);
-                }
-                else
-                {
-                    // 网络失败与后端报错都必须可见提示，不得静默失败（FR-U-07）。
-                    SetStatus(outcome.NetworkFailure
-                        ? outcome.Message
-                        : "提交失败：" + outcome.Message, Color.red);
-                }
+                finalOutcome = outcome;
+                finished = true;
             });
+
+            if (finished && finalOutcome.Success)
+            {
+                SetStatus("提交成功（id: " + finalOutcome.IssueId + "）；标识已按优先级着色留档",
+                    Color.green);
+                if (titleInput != null) titleInput.text = "";
+                if (descriptionInput != null) descriptionInput.text = "";
+                // v1.3 业务逻辑：提交成功 = 该标识锁定为现场记录（A3：红/黄/蓝对应高/中/低），
+                // 不再随手机移动/误触改变；待提交位清空，可继续放置下一个标识（一次一个）。
+                // 失败则保留黄色标识便于重试。
+                if (placer != null) placer.MarkSubmitted(draft.priority);
+            }
+            else if (finished && finalOutcome.NetworkFailure)
+            {
+                // B5：网络失败 → 草稿落盘离线队列，网络恢复后自动重发；
+                // 标识先按优先级锁定（内容已本地保存，不会丢），表单清空可继续巡查。
+                offlineQueue.Enqueue(draft, null);
+                int queued = offlineQueue.Count();
+                SetStatus("网络失败：" + finalOutcome.Message +
+                    "\n已离线暂存（队列 " + queued + " 条），网络恢复后自动重发", Color.yellow);
+                if (titleInput != null) titleInput.text = "";
+                if (descriptionInput != null) descriptionInput.text = "";
+                if (placer != null) placer.MarkSubmitted(draft.priority);
+            }
+            else
+            {
+                // 后端明确报错（400/401/409 等）：展示其 message，保留黄色标识与表单便于修正重试。
+                string msg = finished && !string.IsNullOrEmpty(finalOutcome.Message)
+                    ? finalOutcome.Message
+                    : "请求被中断，请重试";
+                SetStatus("提交失败：" + msg, Color.red);
+            }
 
             running = null;
             if (submitButton != null) submitButton.interactable = true;
