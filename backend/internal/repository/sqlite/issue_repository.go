@@ -77,6 +77,18 @@ func (r *IssueRepo) List(ctx context.Context, f repository.ListFilter) ([]*model
 		where += ` AND category = ?`
 		args = append(args, string(f.Category))
 	}
+	if f.Priority != "" {
+		where += ` AND priority = ?`
+		args = append(args, string(f.Priority))
+	}
+	if f.Since > 0 {
+		where += ` AND created_at >= ?`
+		args = append(args, f.Since)
+	}
+	if f.Until > 0 {
+		where += ` AND created_at <= ?`
+		args = append(args, f.Until)
+	}
 
 	var total int
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues `+where, args...).Scan(&total); err != nil {
@@ -149,8 +161,12 @@ func (r *IssueRepo) UpdateIssueFields(ctx context.Context, id, title, descriptio
 	return n > 0, nil
 }
 
-// Delete 硬删除（A4）。
+// Delete 硬删除（A4）。同批先删照片保证级联一致（B6）：
+// 照片表以 issue_id 为主键，问题删掉后照片必须一并清除。
 func (r *IssueRepo) Delete(ctx context.Context, id string) (bool, error) {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM issue_photos WHERE issue_id = ?`, id); err != nil {
+		return false, err
+	}
 	res, err := r.db.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, id)
 	if err != nil {
 		return false, err

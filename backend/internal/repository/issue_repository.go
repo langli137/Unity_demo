@@ -14,6 +14,10 @@ var ErrNotFound = errors.New("issue not found")
 type ListFilter struct {
 	Status   model.Status
 	Category model.Category
+	Priority model.Priority
+	// Since/Until 创建时间窗口（Unix 毫秒，含边界；0 表示不设限）——B8 报表按时间筛选。
+	Since int64
+	Until int64
 	Page     int
 	PageSize int
 }

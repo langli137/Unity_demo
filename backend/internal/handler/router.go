@@ -27,6 +27,7 @@ func NewRouter(h *IssueHandler, ah *AuthHandler, jwtSecret, allowedOrigin string
 	// 需登录端点（inspector 及以上）。
 	mux.Handle("POST /api/v1/issues", authed(model.RoleInspector, h.CreateIssue))
 	mux.Handle("GET /api/v1/issues", authed(model.RoleInspector, h.ListIssues))
+	mux.Handle("GET /api/v1/issues/export.csv", authed(model.RoleInspector, h.ExportCSV))
 	mux.Handle("POST /api/v1/issues/suggest-priority", authed(model.RoleInspector, h.SuggestPriority))
 	mux.Handle("GET /api/v1/issues/{id}", authed(model.RoleInspector, h.GetIssue))
 	// 两条 PATCH 互不冲突：/status 命中更长路径规则；短路径 /{id} 为字段编辑。

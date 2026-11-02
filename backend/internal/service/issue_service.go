@@ -94,6 +94,12 @@ func (s *IssueService) ListIssues(ctx context.Context, f repository.ListFilter) 
 	if f.Category != "" && !model.ValidCategory(f.Category) {
 		return nil, 0, ErrValidation
 	}
+	if f.Priority != "" && !model.ValidPriority(f.Priority) {
+		return nil, 0, ErrValidation
+	}
+	if f.Since < 0 || f.Until < 0 || (f.Since > 0 && f.Until > 0 && f.Since > f.Until) {
+		return nil, 0, ErrValidation
+	}
 	if f.Page < 1 {
 		f.Page = 1
 	}
@@ -101,6 +107,27 @@ func (s *IssueService) ListIssues(ctx context.Context, f repository.ListFilter) 
 		f.PageSize = 20
 	}
 	return s.repo.List(ctx, f)
+}
+
+// ListAllForExport B8 报表导出：绕过分页钳制（pageSize 上限 100 不够导出全量），
+// 但仍走 ListFilter 校验与筛选；单次导出硬上限 10000 条防 OOM。
+func (s *IssueService) ListAllForExport(ctx context.Context, f repository.ListFilter) ([]*model.Issue, error) {
+	if f.Status != "" && !model.ValidStatus(f.Status) {
+		return nil, ErrValidation
+	}
+	if f.Category != "" && !model.ValidCategory(f.Category) {
+		return nil, ErrValidation
+	}
+	if f.Priority != "" && !model.ValidPriority(f.Priority) {
+		return nil, ErrValidation
+	}
+	if f.Since < 0 || f.Until < 0 || (f.Since > 0 && f.Until > 0 && f.Since > f.Until) {
+		return nil, ErrValidation
+	}
+	f.Page = 1
+	f.PageSize = 10000
+	items, _, err := s.repo.List(ctx, f)
+	return items, err
 }
 
 func (s *IssueService) GetIssue(ctx context.Context, id string) (*model.Issue, error) {

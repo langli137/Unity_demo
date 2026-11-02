@@ -72,6 +72,27 @@ export function suggestPriority(title: string, description: string): Promise<Pri
   return http.post<PrioritySuggestion>('/api/v1/issues/suggest-priority', { title, description })
 }
 
+// B8 CSV 导出：筛选条件 → 二进制下载（带 BOM，Excel 直接可读）。
+export interface ExportParams {
+  status?: Status | ''
+  category?: string
+  priority?: string
+  from?: string // YYYY-MM-DD
+  to?: string // YYYY-MM-DD
+}
+
+export async function exportCSV(params: ExportParams): Promise<Blob> {
+  const q = new URLSearchParams()
+  if (params.status) q.set('status', params.status)
+  if (params.category) q.set('category', params.category)
+  if (params.priority) q.set('priority', params.priority)
+  if (params.from) q.set('from', params.from)
+  if (params.to) q.set('to', params.to)
+  const res = await http.raw(`/api/v1/issues/export.csv?${q.toString()}`)
+  if (!res.ok) throw new Error(`导出失败（HTTP ${res.status}）`)
+  return res.blob()
+}
+
 // B6 照片地址（需带 Authorization，不能直接塞给 <img src>——详情页用 raw() 取 blob）。
 export function photoPath(id: string): string {
   return `/api/v1/issues/${encodeURIComponent(id)}/photo`

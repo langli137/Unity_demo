@@ -231,7 +231,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .detail { grid-template-columns: 80px 1fr; }
 }
 
-/* ===== v1.3 新增：登录 / 顶栏 / 删除 / 建议 / 照片 ===== */
+/* ===== v1.3 新增：登录 / 顶栏 / 删除 / 建议 / 导出 / 照片 ===== */
 
 /* 登录页 */
 .login-card { max-width: 440px; margin: 64px auto; text-align: center; }
@@ -281,6 +281,25 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
+
+/* B8 导出面板 */
+.export-panel {
+  margin: 12px 0;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+}
+.export-panel h2 { margin: 0 0 4px; font-size: 16px; }
+.export-hint { margin: 0 0 10px; font-size: 13px; color: var(--color-text-muted); }
+.export-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.export-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.export-fields label span { color: var(--color-text-muted); }
 
 /* B6 详情照片 */
 .issue-photo {

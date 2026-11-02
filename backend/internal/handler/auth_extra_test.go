@@ -171,6 +171,38 @@ func TestSuggestPriorityAPI(t *testing.T) {
 	}
 }
 
+// TestExportCSVB8：200 + Content-Disposition + BOM；非法日期 400。
+func TestExportCSV(t *testing.T) {
+	router := newTestRouter()
+
+	// 先造一条数据。
+	doJSON(t, router, http.MethodPost, "/api/v1/issues", `{
+		"title":"报表测试","category":"wall_damage","priority":"high",
+		"position":{"x":1,"y":2,"z":3},"anchor":{"planeId":"p1"},
+		"reporterName":"张三"
+	}`)
+
+	rec := doJSON(t, router, http.MethodGet, "/api/v1/issues/export.csv", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
+		t.Errorf("missing attachment header: %q", cd)
+	}
+	if !bytes.HasPrefix(rec.Body.Bytes(), []byte("\xEF\xBB\xBF")) {
+		t.Errorf("missing UTF-8 BOM")
+	}
+	if !strings.Contains(rec.Body.String(), "报表测试") {
+		t.Errorf("csv missing row data: %s", rec.Body.String())
+	}
+
+	// 非法日期 400。
+	rec = doJSON(t, router, http.MethodGet, "/api/v1/issues/export.csv?from=not-a-date", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bad from: status = %d, want 400", rec.Code)
+	}
+}
+
 // TestPhotoRoundtrip B6：上传 → HasPhoto 可见 → 下载字节一致；不存在的问题 404。
 func TestPhotoRoundtrip(t *testing.T) {
 	users := seedUsers()
