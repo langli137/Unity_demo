@@ -217,6 +217,20 @@ namespace ParkInspect.AR
             }
         }
 
+        /// <summary>
+        /// A2 历史问题坐标回显：在 issue.position（世界坐标）放置一枚按优先级着色的标记，
+        /// 加入 submittedMarkers 集合（可长按移除，与现场标记同一套管理）。
+        /// 注意：坐标来自上报时的世界坐标系，跨会话/跨设备需同一空间基准才对得准（见需求文档 Q-跨会话）。
+        /// </summary>
+        public GameObject AddHistoryMarker(Vector3 position, string priority)
+        {
+            GameObject go = CreateMarker();
+            go.transform.SetPositionAndRotation(position, Quaternion.identity);
+            Tint(go, PriorityColor(priority));
+            submittedMarkers.Add(go);
+            return go;
+        }
+
         /// <summary>取消当前待提交标记（长按确认后调用，FR-U-08 补充）。</summary>
         public void CancelMarker()
         {

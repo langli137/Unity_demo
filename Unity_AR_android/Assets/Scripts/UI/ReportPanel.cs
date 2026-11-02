@@ -18,6 +18,7 @@ namespace ParkInspect.UI
     /// - 经 IssueReportService 提交，成功/失败都显示可见提示（FR-U-07）。
     /// v1.4 新增：
     /// - A1 启动自动登录（Inspector 配置账号），登录后上报人自动填充；
+    /// - A2 历史问题列表（OnGUI 面板）+ 按坐标回显优先级着色标记。
     /// 分类不采集（D6：缺省 other）；后端地址在 Inspector 的 baseUrl 配置（真机填局域网 IP）。
     /// </summary>
     public class ReportPanel : MonoBehaviour
@@ -64,6 +65,7 @@ namespace ParkInspect.UI
         ApiClient api;                 // A1/B6/B5 复用：登录、照片上传、列表拉取都走同一客户端
         Coroutine running;
         Coroutine loginRoutine;
+        Coroutine historyRoutine;
         float detectStartTime;   // 平面检测等待起点
         float planeFoundTime = -1f; // 首次检测到平面的时刻，-1 表示尚未检测到
 
@@ -72,6 +74,21 @@ namespace ParkInspect.UI
         string loginDisplayName = "";
         string loginError;
 
+        // A2 历史问题面板状态。
+        bool historyOpen;
+        bool historyLoading;
+        string historyError = "";
+        readonly System.Collections.Generic.List<IssueListItem> historyItems =
+            new System.Collections.Generic.List<IssueListItem>();
+
+        // OnGUI 弹窗/面板样式缓存（一次性创建避免每帧分配）。
+        GUIStyle confirmLabelStyle;
+        GUIStyle confirmButtonStyle;
+        GUIStyle historyTitleStyle;
+        GUIStyle historyRowStyle;
+        GUIStyle historyButtonStyle;
+        Vector2 historyScroll;
+
         // 长按取消状态机：手指按下累计时长 + 是否已弹出确认框。
         float longPressTimer;
         bool longPressArmed;      // 当前按住且位置合法
@@ -79,10 +96,6 @@ namespace ParkInspect.UI
         bool confirmTargetActive; // 确认框对象是否为待提交（黄）标记
         Vector2 longPressStart;
         Vector2 confirmHitPos;    // 触发长按命中时的触点位置（确认后按此位置移除）
-
-        // OnGUI 弹窗样式缓存（一次性创建避免每帧分配）。
-        GUIStyle confirmLabelStyle;
-        GUIStyle confirmButtonStyle;
 
         void Awake()
         {
@@ -174,7 +187,7 @@ namespace ParkInspect.UI
         void HandlePlacementTouch()
         {
             if (placer == null) return;
-            if (confirmShown) return; // 确认框弹出期间不响应放置
+            if (confirmShown || historyOpen) return; // 弹窗/历史面板期间不响应放置
 
             Vector2 pos;
             int fingerId;
@@ -232,8 +245,8 @@ namespace ParkInspect.UI
         {
             if (placer == null) return;
 
-            // 确认框弹出期间冻结长按状态。
-            if (confirmShown) return;
+            // 确认框/历史面板弹出期间冻结长按状态。
+            if (confirmShown || historyOpen) return;
 
             bool pressing = false;
             Vector2 pos = Vector2.zero;
@@ -287,32 +300,214 @@ namespace ParkInspect.UI
             longPressArmed = false;
         }
 
-        /// <summary>取消确认弹窗（OnGUI：无需改场景接线，长按属轻量交互）。</summary>
+        /// <summary>
+        /// OnGUI 弹窗/面板（无需改场景接线）：
+        /// - 常驻"历史问题"入口按钮（A2）；
+        /// - 历史问题列表面板：拉取列表、按坐标回显优先级着色标记；
+        /// - 长按取消确认框（v1.3）。
+        /// </summary>
         void OnGUI()
         {
-            if (!confirmShown) return;
+            EnsureGuiStyles();
 
-            if (confirmLabelStyle == null)
+            // 历史入口：常驻左上角；面板打开时变为"关闭"。
+            Rect toggleRect = new Rect(16, 16, Screen.width * 0.3f, 96f);
+            string toggleLabel = historyOpen ? "关闭历史" : "历史问题";
+            if (GUI.Button(toggleRect, toggleLabel, historyButtonStyle))
             {
-                confirmLabelStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 46,
-                    alignment = TextAnchor.MiddleCenter,
-                    wordWrap = true,
-                };
-                confirmLabelStyle.normal.textColor = Color.white;
-                // 默认 GUI.Button 字号在真机上极小（约 14px 级别），必须显式放大。
-                confirmButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 44 };
+                historyOpen = !historyOpen;
+                if (historyOpen && historyItems.Count == 0 && !historyLoading)
+                    FetchHistory();
             }
+
+            if (historyOpen) DrawHistoryPanel();
+            if (confirmShown) DrawConfirmDialog();
+        }
+
+        void EnsureGuiStyles()
+        {
+            if (confirmLabelStyle != null) return;
+            confirmLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 46,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+            };
+            confirmLabelStyle.normal.textColor = Color.white;
+            // 默认 GUI.Button 字号在真机上极小（约 14px 级别），必须显式放大。
+            confirmButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 44 };
+            historyButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 36 };
+            historyTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 38, fontStyle = FontStyle.Bold };
+            historyRowStyle = new GUIStyle(GUI.skin.label) { fontSize = 32, wordWrap = true };
+        }
+
+        /// <summary>A2 历史问题面板：列表 + 刷新 + 按坐标回显标记。</summary>
+        void DrawHistoryPanel()
+        {
+            float panelW = Screen.width * 0.92f;
+            float panelH = Screen.height * 0.62f;
+            Rect panel = new Rect((Screen.width - panelW) / 2f, 130f, panelW, panelH);
+
+            // 半透明遮罩吸收触摸（面板期间不放置/不长按）。
+            GUI.color = new Color(0, 0, 0, 0.45f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Box(panel, "");
+
+            GUI.Label(new Rect(panel.x + 20, panel.y + 14, panel.width - 240, 60),
+                "历史问题（" + historyItems.Count + " 条）", historyTitleStyle);
+
+            // 刷新按钮。
+            if (GUI.Button(new Rect(panel.xMax - 210, panel.y + 12, 90, 56),
+                historyLoading ? "…" : "刷新", historyButtonStyle) && !historyLoading)
+            {
+                FetchHistory();
+            }
+            // 一键回显：全部按坐标放标记。
+            if (GUI.Button(new Rect(panel.xMax - 110, panel.y + 12, 90, 56), "回显", historyButtonStyle)
+                && historyItems.Count > 0)
+            {
+                int n = ShowAllHistoryMarkers();
+                SetStatus("已回显 " + n + " 枚历史标记（按优先级着色）", Color.gray);
+                historyOpen = false;
+            }
+
+            float listY = panel.y + 84;
+            float listH = panel.yMax - listY - 20f;
+            Rect view = new Rect(panel.x + 12, listY, panel.width - 24, listH);
+            Rect content = new Rect(0, 0, view.width - 30,
+                historyLoading || !string.IsNullOrEmpty(historyError)
+                    ? 80f
+                    : historyItems.Count * 118f);
+
+            historyScroll = GUI.BeginScrollView(view, historyScroll, content);
+
+            float rowY = 0f;
+            if (historyLoading)
+            {
+                GUI.Label(new Rect(10, rowY, content.width, 60), "加载中…", historyRowStyle);
+            }
+            else if (!string.IsNullOrEmpty(historyError))
+            {
+                GUI.Label(new Rect(10, rowY, content.width, 80), historyError, historyRowStyle);
+            }
+            else
+            {
+                for (int i = 0; i < historyItems.Count; i++)
+                {
+                    IssueListItem item = historyItems[i];
+                    Rect row = new Rect(0, rowY, content.width, 110f);
+                    GUI.Box(row, "");
+
+                    // 优先级色块（A3：红/黄/蓝）。
+                    Color prev = GUI.color;
+                    GUI.color = PlaneAnchorPlacer.PriorityColor(item.priority);
+                    GUI.DrawTexture(new Rect(row.x + 8, row.y + 12, 26, 26), Texture2D.whiteTexture);
+                    GUI.color = prev;
+
+                    string statusLabel = item.status == "resolved" ? "已解决"
+                        : item.status == "in_progress" ? "处理中" : "待处理";
+                    string title = string.IsNullOrEmpty(item.title) ? "（无标题）" : item.title;
+                    if (title.Length > 18) title = title.Substring(0, 18) + "…";
+                    GUI.Label(new Rect(row.x + 46, row.y + 8, row.width - 150, 46),
+                        "[" + statusLabel + "] " + title, historyRowStyle);
+                    string sub = (item.reporterName ?? "") + "  " +
+                        (string.IsNullOrEmpty(item.createdAt) ? "" : item.createdAt.Substring(0, Mathf.Min(16, item.createdAt.Length)));
+                    GUI.Label(new Rect(row.x + 46, row.y + 56, row.width - 150, 46), sub, historyRowStyle);
+
+                    // 单条回显：按存储坐标放一枚优先级色标记。
+                    if (GUI.Button(new Rect(row.xMax - 96, row.y + 26, 84, 56), "标记", historyButtonStyle))
+                    {
+                        if (ShowHistoryMarker(item))
+                            SetStatus("已回显：" + item.title, Color.gray);
+                        else
+                            SetStatus("该问题缺少坐标，无法回显", Color.yellow);
+                        historyOpen = false;
+                    }
+                    rowY += 118f;
+                }
+            }
+
+            GUI.EndScrollView();
+        }
+
+        /// <summary>拉取历史问题列表（A2，需登录）。</summary>
+        void FetchHistory()
+        {
+            if (historyRoutine != null) return;
+            historyRoutine = StartCoroutine(FetchHistoryRoutine());
+        }
+
+        IEnumerator FetchHistoryRoutine()
+        {
+            historyLoading = true;
+            historyError = "";
+
+            // 未登录先登录（A1），否则列表接口 401。
+            if (!loggedIn)
+            {
+                yield return LoginRoutine();
+            }
+            if (!loggedIn)
+            {
+                historyError = "登录失败，无法拉取历史：" +
+                    (string.IsNullOrEmpty(loginError) ? "未知原因" : loginError);
+                historyLoading = false;
+                historyRoutine = null;
+                yield break;
+            }
+
+            yield return api.GetIssues((code, message, data) =>
+            {
+                if (code == 0 && data != null && data.items != null)
+                {
+                    historyItems.Clear();
+                    historyItems.AddRange(data.items);
+                    historyError = "";
+                }
+                else
+                {
+                    historyError = string.IsNullOrEmpty(message)
+                        ? "拉取失败（code=" + code + "）"
+                        : message;
+                }
+            });
+
+            historyLoading = false;
+            historyRoutine = null;
+        }
+
+        /// <summary>按 issue.position 放一枚优先级着色标记（跨会话坐标系一致时位置才准确）。</summary>
+        bool ShowHistoryMarker(IssueListItem item)
+        {
+            if (placer == null || item == null || item.position == null) return false;
+            var p = item.position;
+            if (p.x == 0f && p.y == 0f && p.z == 0f) return false; // 零值 = 管理端补录，无 AR 坐标
+            placer.AddHistoryMarker(new Vector3(p.x, p.y, p.z), item.priority);
+            return true;
+        }
+
+        /// <summary>一键回显全部有坐标的标记，返回成功放置数。</summary>
+        int ShowAllHistoryMarkers()
+        {
+            int n = 0;
+            foreach (var item in historyItems)
+                if (ShowHistoryMarker(item)) n++;
+            return n;
+        }
+
+        /// <summary>取消确认弹窗（长按属轻量交互）。</summary>
+        void DrawConfirmDialog()
+        {
+            float panelW = Screen.width * 0.82f;
+            float panelH = 420f;
+            Rect panel = new Rect((Screen.width - panelW) / 2f, (Screen.height - panelH) / 2f, panelW, panelH);
 
             // 半透明遮罩：吸收触摸，防止确认期间误操作场景。
             GUI.color = new Color(0, 0, 0, 0.45f);
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float panelW = Screen.width * 0.82f;
-            float panelH = 420f;
-            Rect panel = new Rect((Screen.width - panelW) / 2f, (Screen.height - panelH) / 2f, panelW, panelH);
             GUI.Box(panel, "");
 
             string msg = confirmTargetActive

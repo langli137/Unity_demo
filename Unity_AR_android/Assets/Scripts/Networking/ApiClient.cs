@@ -78,6 +78,33 @@ namespace ParkInspect.Networking
         }
 
         /// <summary>
+        /// 拉取历史问题列表（A2）：GET /api/v1/issues?page=1&pageSize=100（需登录）。
+        /// 只取第一页 100 条——现场回看场景不需要全量翻页。
+        /// </summary>
+        public System.Collections.IEnumerator GetIssues(Action<int, string, IssueListData> onDone)
+        {
+            long status = 0;
+            string text = null;
+            bool networkFail = false;
+            yield return Request("GET", "/api/v1/issues?page=1&pageSize=100", null, null,
+                (s, b, n) => { status = s; text = b; networkFail = n; });
+
+            if (networkFail)
+            {
+                onDone?.Invoke(-1, "网络请求失败，无法拉取历史问题", null);
+                yield break;
+            }
+
+            IssueListResponse shell = TryParse<IssueListResponse>(text);
+            if (shell == null)
+            {
+                onDone?.Invoke(status != 0 ? (int)status : -1, "后端响应无法解析", null);
+                yield break;
+            }
+            onDone?.Invoke(shell.code, shell.message, shell.data);
+        }
+
+        /// <summary>
         /// 带重试的请求协程。重试仅针对网络层失败（连接超时/中断）；
         /// 服务器已应答（无论成功还是 4xx/5xx）都直接返回。
         /// </summary>

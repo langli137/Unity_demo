@@ -45,4 +45,45 @@ namespace ParkInspect.Data
         public string message;
         public LoginData data;
     }
+
+    /// <summary>
+    /// 历史问题列表项（契约：GET /api/v1/issues 的 items 元素，字段取自 model.Issue 的子集）。
+    /// 仅取 AR 端展示/回显所需字段；多余字段 JsonUtility 自动忽略。
+    /// </summary>
+    [Serializable]
+    public class IssueListItem
+    {
+        public string id;
+        public string title;
+        public string description;
+        /// <summary>wall_damage | equipment_fault | safety_hazard | other</summary>
+        public string category;
+        /// <summary>low | medium | high</summary>
+        public string priority;
+        /// <summary>open | in_progress | resolved</summary>
+        public string status;
+        public Vector3Data position;
+        public string reporterName;
+        /// <summary>RFC3339 时间串，展示时截取前 16 位即可。</summary>
+        public string createdAt;
+    }
+
+    /// <summary>列表响应 data：{items,total,page,pageSize}。</summary>
+    [Serializable]
+    public class IssueListData
+    {
+        public IssueListItem[] items;
+        public int total;
+        public int page;
+        public int pageSize;
+    }
+
+    /// <summary>列表响应壳。</summary>
+    [Serializable]
+    public class IssueListResponse
+    {
+        public int code;
+        public string message;
+        public IssueListData data;
+    }
 }
