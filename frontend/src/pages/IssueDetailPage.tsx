@@ -2,7 +2,7 @@
 // 三态任意互转合法（v1.1 Q1）；409 一定提示并刷新。
 // 编辑范围 = 标题/描述/分类/优先级/上报人；状态走上方状态按钮，AR 定位字段只读
 //（由 AR 上报时一次性写入，管理端不改）。表单复用 components/IssueForm。
-// v1.3：A4 删除（admin）。
+// v1.3：A4 删除（admin）+ B6 现场照片查看。
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { useIssue } from '../hooks/useIssue'
@@ -12,7 +12,8 @@ import { StatusBadge } from '../components/StatusBadge'
 import { IssueForm, type IssueFormValue } from '../components/IssueForm'
 import type { Status } from '../types/issue'
 import { CATEGORY_LABELS, PRIORITY_LABELS } from '../types/issue'
-import { deleteIssue } from '../api/issues'
+import { deleteIssue, photoPath } from '../api/issues'
+import { http } from '../api/client'
 import { getStoredUser, isAdmin } from '../api/auth'
 
 interface Props {
@@ -36,9 +37,36 @@ export function IssueDetailPage({ id, onBack }: Props) {
   // 编辑模式开关 + 表单草稿；进入编辑时以当前 issue 值填充。
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<IssueFormValue>(EMPTY_DRAFT)
+  // B6 现场照片：存在则取 blob 展示（404 = 无照片，静默不显示）。
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   // A4 删除。
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let revoked: string | null = null
+    let cancelled = false
+    if (issue) {
+      void (async () => {
+        try {
+          const res = await http.raw(photoPath(id))
+          if (res.status === 404) return // 无照片：正常情况，不报错
+          if (!res.ok) return
+          const blob = await res.blob()
+          if (cancelled) return
+          revoked = URL.createObjectURL(blob)
+          setPhotoUrl(revoked)
+        } catch {
+          // 取图失败不影响详情主流程（照片是增强信息）。
+        }
+      })()
+    }
+    return () => {
+      cancelled = true
+      if (revoked) URL.revokeObjectURL(revoked)
+      setPhotoUrl(null)
+    }
+  }, [id, issue])
 
   useEffect(() => {
     if (issue) {
@@ -145,6 +173,20 @@ export function IssueDetailPage({ id, onBack }: Props) {
           <dl className="detail">
             <dt>描述</dt>
             <dd>{issue.description || '—'}</dd>
+            {photoUrl && (
+              <>
+                <dt>现场照片</dt>
+                <dd>
+                  <img
+                    className="issue-photo"
+                    src={photoUrl}
+                    alt="现场照片"
+                    onClick={() => window.open(photoUrl)}
+                  />
+                  <span className="photo-hint">点击放大</span>
+                </dd>
+              </>
+            )}
             <dt>分类</dt>
             <dd>{CATEGORY_LABELS[issue.category] ?? issue.category}</dd>
             <dt>优先级</dt>

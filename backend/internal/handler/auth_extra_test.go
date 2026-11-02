@@ -142,3 +142,58 @@ func TestDeleteIssueAPI(t *testing.T) {
 		t.Errorf("double delete: status = %d, want 404", rec.Code)
 	}
 }
+
+// TestPhotoRoundtrip B6：上传 → HasPhoto 可见 → 下载字节一致；不存在的问题 404。
+func TestPhotoRoundtrip(t *testing.T) {
+	users := seedUsers()
+	photos := mem.NewPhotoRepo()
+	issues := mem.New()
+	svc := service.NewIssueService(issues).WithPhotos(photos)
+	router := NewRouter(NewIssueHandler(svc), NewAuthHandler(service.NewAuthService(users, testJWTSecret)),
+		testJWTSecret, "http://localhost:5173")
+
+	// 创建。
+	rec := doJSON(t, router, http.MethodPost, "/api/v1/issues", `{
+		"title":"拍照问题","category":"other","priority":"low",
+		"position":{"x":0,"y":0,"z":0},"anchor":{"planeId":""}
+	}`)
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created.Data.ID
+
+	// 上传。
+	jpeg := []byte("\xFF\xD8\xFF\xE0fake-jpeg-bytes")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/issues/"+id+"/photo", bytes.NewReader(jpeg))
+	req.Header.Set("Authorization", "Bearer "+testToken(t))
+	req.Header.Set("Content-Type", "image/jpeg")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	// 下载字节一致。
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/issues/"+id+"/photo", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken(t))
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), jpeg) {
+		t.Errorf("download: status = %d, bytes equal = %v", rec.Code, bytes.Equal(rec.Body.Bytes(), jpeg))
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("content-type = %q", ct)
+	}
+
+	// 不存在的问题上传 404。
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/issues/no-such/photo", bytes.NewReader(jpeg))
+	req.Header.Set("Authorization", "Bearer "+testToken(t))
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("upload missing issue: status = %d, want 404", rec.Code)
+	}
+}

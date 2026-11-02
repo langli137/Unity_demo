@@ -24,8 +24,9 @@ func main() {
 
 	db := repo.ExposeDB()
 	userRepo := sqlite.NewUserRepo(db)
+	photoRepo := sqlite.NewPhotoRepo(db)
 
-	issueSvc := service.NewIssueService(repo)
+	issueSvc := service.NewIssueService(repo).WithPhotos(photoRepo)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 
 	router := handler.NewRouter(

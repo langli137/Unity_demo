@@ -19,3 +19,10 @@ INSERT OR IGNORE INTO users (username, display_name, role, password_hash, salt, 
   ('inspector', '巡检员', 'inspector',
    'c734e69f8f3ad7b20bb63a0845025442739009a1676605f23e15aef8557bd330', 'inspector',
    strftime('%s','now') * 1000);
+
+-- 问题照片留档（B6）：存 BLOB 避免文件路径管理；issue_id 主键 = 一问题一照片（后拍覆盖前拍）。
+CREATE TABLE IF NOT EXISTS issue_photos (
+  issue_id TEXT PRIMARY KEY,
+  data BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+);

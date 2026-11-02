@@ -231,7 +231,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .detail { grid-template-columns: 80px 1fr; }
 }
 
-/* ===== v1.3 新增：登录 / 顶栏 / 删除 ===== */
+/* ===== v1.3 新增：登录 / 顶栏 / 删除 / 照片 ===== */
 
 /* 登录页 */
 .login-card { max-width: 440px; margin: 64px auto; text-align: center; }
@@ -257,3 +257,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   color: #dc2626;
 }
 .btn-danger:hover:not(:disabled) { background: #fef2f2; border-color: #b91c1c; }
+
+/* B6 详情照片 */
+.issue-photo {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  cursor: zoom-in;
+  display: block;
+}
+.photo-hint { font-size: 12px; color: var(--color-text-muted); margin-top: 4px; display: block; }

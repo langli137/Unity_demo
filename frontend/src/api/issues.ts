@@ -60,3 +60,8 @@ export function updateIssue(id: string, input: UpdateIssueInput): Promise<Issue>
 export function deleteIssue(id: string): Promise<void> {
   return http.del<void>(`/api/v1/issues/${encodeURIComponent(id)}`)
 }
+
+// B6 照片地址（需带 Authorization，不能直接塞给 <img src>——详情页用 raw() 取 blob）。
+export function photoPath(id: string): string {
+  return `/api/v1/issues/${encodeURIComponent(id)}/photo`
+}

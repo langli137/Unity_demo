@@ -16,7 +16,7 @@ import (
 const testJWTSecret = "test-secret"
 
 func newTestRouter() http.Handler {
-	svc := service.NewIssueService(mem.New())
+	svc := service.NewIssueService(mem.New()).WithPhotos(mem.NewPhotoRepo())
 	authSvc := service.NewAuthService(mem.NewUserRepo(), testJWTSecret)
 	return NewRouter(NewIssueHandler(svc), NewAuthHandler(authSvc), testJWTSecret, "http://localhost:5173")
 }

@@ -32,3 +32,39 @@ func (r *UserRepo) GetByUsername(_ context.Context, username string) (*repositor
 	cp := *rec
 	return &cp, nil
 }
+
+// PhotoRepo 照片内存实现（B6 单测）。
+type PhotoRepo struct {
+	mu     sync.Mutex
+	photos map[string][]byte
+}
+
+func NewPhotoRepo() *PhotoRepo { return &PhotoRepo{photos: map[string][]byte{}} }
+
+func (r *PhotoRepo) SavePhoto(_ context.Context, issueID string, data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	r.photos[issueID] = cp
+	return nil
+}
+
+func (r *PhotoRepo) GetPhoto(_ context.Context, issueID string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	data, ok := r.photos[issueID]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	return cp, nil
+}
+
+func (r *PhotoRepo) HasPhoto(_ context.Context, issueID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.photos[issueID]
+	return ok, nil
+}

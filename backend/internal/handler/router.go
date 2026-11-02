@@ -31,6 +31,9 @@ func NewRouter(h *IssueHandler, ah *AuthHandler, jwtSecret, allowedOrigin string
 	// 两条 PATCH 互不冲突：/status 命中更长路径规则；短路径 /{id} 为字段编辑。
 	mux.Handle("PATCH /api/v1/issues/{id}", authed(model.RoleInspector, h.UpdateIssue))
 	mux.Handle("PATCH /api/v1/issues/{id}/status", authed(model.RoleInspector, h.UpdateIssueStatus))
+	// 照片：上传/下载均需登录（inspector 上传留档，管理端登录后看图）。
+	mux.Handle("POST /api/v1/issues/{id}/photo", authed(model.RoleInspector, h.UploadPhoto))
+	mux.Handle("GET /api/v1/issues/{id}/photo", authed(model.RoleInspector, h.GetPhoto))
 	// 仅 admin：删除。
 	mux.Handle("DELETE /api/v1/issues/{id}", authed(model.RoleAdmin, h.DeleteIssue))
 

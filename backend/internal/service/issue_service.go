@@ -23,12 +23,19 @@ var (
 )
 
 type IssueService struct {
-	repo repository.IssueRepository
-	now  func() time.Time
+	repo   repository.IssueRepository
+	photos repository.PhotoRepository // B6 照片留档；nil 时照片操作返回验证错误（单测兼容）
+	now    func() time.Time
 }
 
 func NewIssueService(repo repository.IssueRepository) *IssueService {
 	return &IssueService{repo: repo, now: time.Now}
+}
+
+// WithPhotos 注入照片仓储（装配处调用；返回自身便于链式）。
+func (s *IssueService) WithPhotos(p repository.PhotoRepository) *IssueService {
+	s.photos = p
+	return s
 }
 
 type CreateIssueInput struct {

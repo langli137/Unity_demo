@@ -63,4 +63,10 @@ export const http = {
   patch: <T>(path: string, data: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  // 二进制下载（B8 CSV / B6 图片）：绕过 JSON 解包，返回原始 Response。
+  raw: (path: string, init?: RequestInit) =>
+    fetch(BASE_URL + path, {
+      ...init,
+      headers: { ...authHeaders(), ...init?.headers },
+    }),
 }

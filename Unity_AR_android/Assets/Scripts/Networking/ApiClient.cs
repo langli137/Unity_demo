@@ -105,6 +105,41 @@ namespace ParkInspect.Networking
         }
 
         /// <summary>
+        /// 上传现场照片（B6）：POST /api/v1/issues/{id}/photo，
+        /// raw body 即 JPEG 字节（后端不走 multipart）。响应为统一壳 {code,message}。
+        /// </summary>
+        public System.Collections.IEnumerator UploadPhoto(
+            string issueId, byte[] jpeg, Action<int, string> onDone)
+        {
+            if (string.IsNullOrEmpty(issueId) || jpeg == null || jpeg.Length == 0)
+            {
+                onDone?.Invoke(-1, "照片参数不完整");
+                yield break;
+            }
+
+            long status = 0;
+            string text = null;
+            bool networkFail = false;
+            yield return Request("POST", "/api/v1/issues/" + issueId + "/photo", jpeg,
+                "image/jpeg",
+                (s, b, n) => { status = s; text = b; networkFail = n; });
+
+            if (networkFail)
+            {
+                onDone?.Invoke(-1, "网络请求失败，照片未上传");
+                yield break;
+            }
+
+            ApiResponse shell = TryParse<ApiResponse>(text);
+            if (shell == null)
+            {
+                onDone?.Invoke(status != 0 ? (int)status : -1, "后端响应无法解析");
+                yield break;
+            }
+            onDone?.Invoke(shell.code, shell.message);
+        }
+
+        /// <summary>
         /// 带重试的请求协程。重试仅针对网络层失败（连接超时/中断）；
         /// 服务器已应答（无论成功还是 4xx/5xx）都直接返回。
         /// </summary>

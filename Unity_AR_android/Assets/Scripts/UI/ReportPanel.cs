@@ -19,7 +19,8 @@ namespace ParkInspect.UI
     /// - 经 IssueReportService 提交，成功/失败都显示可见提示（FR-U-07）。
     /// v1.4 新增：
     /// - A1 启动自动登录（Inspector 配置账号），登录后上报人自动填充；
-    /// - B5 网络失败的草稿落盘离线队列，网络恢复后自动重发；
+    /// - B6 提交成功后上传现场截屏（raw JPEG）；
+    /// - B5 网络失败的草稿+照片落盘离线队列，网络恢复后自动重发；
     /// - A2 历史问题列表（OnGUI 面板）+ 按坐标回显优先级着色标记。
     /// 分类不采集（D6：缺省 other）；后端地址在 Inspector 的 baseUrl 配置（真机填局域网 IP）。
     /// </summary>
@@ -220,6 +221,21 @@ namespace ParkInspect.UI
                 if (ok)
                 {
                     offlineQueue.Remove(entry.localId);
+                    // 重发成功后补传暂存的照片（B6；无照片则跳过）。
+                    if (!string.IsNullOrEmpty(entry.photoBase64))
+                    {
+                        byte[] photo;
+                        try { photo = Convert.FromBase64String(entry.photoBase64); }
+                        catch (Exception) { photo = null; }
+                        if (photo != null && photo.Length > 0)
+                        {
+                            yield return api.UploadPhoto(issueId, photo, (c, m) =>
+                            {
+                                if (c != 0)
+                                    Debug.LogWarning("[ReportPanel] 离线记录照片补传失败：" + m);
+                            });
+                        }
+                    }
                     SetStatus("离线暂存已重发成功（id: " + issueId + "），队列剩 " +
                         offlineQueue.Count() + " 条", Color.green);
                 }
@@ -747,6 +763,10 @@ namespace ParkInspect.UI
             if (submitButton != null) submitButton.interactable = false;
             SetStatus("提交中…", Color.gray);
 
+            // B6：提交前抓一帧现场画面（含已放置标识）作为留档照片；失败不阻断上报主流程。
+            byte[] photoJpeg = null;
+            yield return CaptureFrameJpeg(jpeg => photoJpeg = jpeg);
+
             // 提交前快照：成功后把该标记按优先级着色（位置已随 draft 固化）。
             IssueReportService.SubmitOutcome finalOutcome = default;
             bool finished = false;
@@ -758,6 +778,17 @@ namespace ParkInspect.UI
 
             if (finished && finalOutcome.Success)
             {
+                // B6：创建成功后上传现场照片；照片失败仅告警（问题本体已留档，不回滚）。
+                if (photoJpeg != null && photoJpeg.Length > 0)
+                {
+                    SetStatus("提交成功，正在上传现场照片…", Color.gray);
+                    yield return api.UploadPhoto(finalOutcome.IssueId, photoJpeg, (c, m) =>
+                    {
+                        if (c != 0)
+                            Debug.LogWarning("[ReportPanel] 现场照片上传失败（问题已留档）：" + m);
+                    });
+                }
+
                 SetStatus("提交成功（id: " + finalOutcome.IssueId + "）；标识已按优先级着色留档",
                     Color.green);
                 if (titleInput != null) titleInput.text = "";
@@ -769,9 +800,9 @@ namespace ParkInspect.UI
             }
             else if (finished && finalOutcome.NetworkFailure)
             {
-                // B5：网络失败 → 草稿落盘离线队列，网络恢复后自动重发；
+                // B5：网络失败 → 草稿+照片落盘离线队列，网络恢复后自动重发；
                 // 标识先按优先级锁定（内容已本地保存，不会丢），表单清空可继续巡查。
-                offlineQueue.Enqueue(draft, null);
+                offlineQueue.Enqueue(draft, photoJpeg);
                 int queued = offlineQueue.Count();
                 SetStatus("网络失败：" + finalOutcome.Message +
                     "\n已离线暂存（队列 " + queued + " 条），网络恢复后自动重发", Color.yellow);
@@ -790,6 +821,31 @@ namespace ParkInspect.UI
 
             running = null;
             if (submitButton != null) submitButton.interactable = true;
+        }
+
+        /// <summary>
+        /// B6 抓取当前帧并编码 JPEG（quality 75，约 100~300KB）。
+        /// WaitForEndOfFrame 后才能读到渲染完成的画面；任何异常都返回 null（照片是增强信息，不阻断上报）。
+        /// </summary>
+        IEnumerator CaptureFrameJpeg(Action<byte[]> onDone)
+        {
+            byte[] result = null;
+            yield return new WaitForEndOfFrame();
+            try
+            {
+                Texture2D tex = ScreenCapture.CaptureScreenshotAsTexture();
+                if (tex != null)
+                {
+                    result = tex.EncodeToJPG(75);
+                    Destroy(tex);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[ReportPanel] 现场截屏失败（不影响上报）：" + e.Message);
+                result = null;
+            }
+            onDone?.Invoke(result);
         }
 
         void SetStatus(string msg, Color? color)
