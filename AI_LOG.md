@@ -1,4 +1,86 @@
 
+## P-030
+
+- 目标：实现用户拍板的"A.核心功能 + B.现场刚需"全部 8 项：A1 登录与角色权限、A2 Unity 历史问题列表、A3 标记按优先级变色、A4 删除、B5 断网离线暂存、B6 裂缝拍照留档、B7 智能优先级建议、B8 导出巡检报表 CSV。
+
+### Prompt 历史（续接会话汇总）
+
+> 实现A.核心功能+B现场刚需
+
+### 结果
+
+- **后端**（Go，无新增外部依赖）：
+  1. **A1**：手写 HS256 JWT（`internal/auth`，crypto/hmac，TTL 7 天，claims {sub,role,exp}）+ SHA-256 加盐口令；`migrations/002_auth_photo.sql` 幂等建 `users` 表并 `INSERT OR IGNORE` 种子账号 admin/admin123、inspector/inspector123；`POST /api/v1/auth/login` 公开，其余接口 `RequireAuth(jwtSecret, RequireRole(minRole, fn))`——**顺序必须 auth 在外层**（先写 context 再校验角色，反了会全 401）；DELETE 仅 admin（inspector 403 实测通过）。
+  2. **A4/B6/B7/B8**：`issue_extra_handler.go` 承载 DELETE（级联删照片）、照片 raw 上传/读取（BLOB 存 `issue_photos`，issue_id 主键覆盖式，8MB 上限）、`POST /issues/suggest-priority`（纯关键词规则引擎：坍塌/承重/漏电…→high，裂缝/松动/护栏…→medium，污渍/划痕…→low，未命中兜底 medium）、`GET /issues/export.csv`（UTF-8 BOM + 中文表头 + `from/to` YYYY-MM-DD 过滤，`ListAllForExport` 绕过 100 条分页钳制、10000 硬顶）。
+- **管理端**（React，未引入任何新框架）：`api/auth.ts`（localStorage 会话 + 401 广播）→ `client.ts` 自动带 Bearer → `App.tsx` 登录门控 + 顶栏身份/退出 + `LoginPage` 演示账号提示；详情页 admin 才渲染删除按钮（confirm 二次确认）+ 现场照片 blob 拉取（404 静默=无照片）+ 编辑表单接"✨ 智能建议优先级"（`usePrioritySuggestion`，建议展示+一键采用，不自动应用）；列表页导出面板（优先级/起止日期 + 沿用当前状态分类筛选）+ CSV 下载（Blob + a[download]）。
+- **Unity**（v1.4）：
+  1. `Data/AuthModels.cs`（新）：LoginRequest/LoginData/IssueListItem/IssueListData 及响应壳——JsonUtility 不支持泛型，登录/列表/创建三种 data 各自定壳；
+  2. `ApiClient.cs`（改）：抽底层 `Request(method,path,body,contentType,cb)` 统一承载双地址重试 + Token 非空自动带 Bearer；新增 `Login`（成功即写 Token）、`GetIssues`（pageSize=100）、`UploadPhoto`（raw JPEG）；
+  3. `Networking/OfflineQueue.cs`（新）：B5 本地队列 `persistentDataPath/offline_queue.json`，条目含 draftJson + 照片 base64 + 入队时间，损坏条目自动丢弃；
+  4. `PlaneAnchorPlacer.cs`（改）：`MarkSubmitted(priority)` 按优先级着色（high 红/medium 黄/low 蓝，`PriorityColor` 静态映射）+ `AddHistoryMarker(pos, priority)` 坐标回显（进 submittedMarkers 可长按移除）；
+  5. `ReportPanel.cs`（改）：A1 自动登录（Inspector 字段 `autoLogin/autoLoginUsername/autoLoginPassword`，默认 inspector/inspector123，成功自动填上报人）；B6 提交前 `WaitForEndOfFrame` 抓帧 EncodeToJPG(75) → 创建成功后 raw 上传（照片失败仅告警不回滚）；B5 网络失败 → 草稿+照片入队 + 标记按优先级锁定 + 可见提示，`FlushOfflineRoutine` 每 10 秒重发（未登录跳过、后端明确拒绝才出队）；A2 左上角"历史问题" OnGUI 面板（列表/刷新/单条标记/一键回显，零值坐标=补录问题跳过）。
+- **验证**（三端全绿）：后端 `go build && go vet && go test ./...` EXIT=0，真实进程联调——登录（双账号）→ 创建 → 列表 → suggest-priority（"承重结构开裂，随时可能坍塌"→ high，命中坍塌/承重）→ 照片上传/下载字节数一致 → CSV 严格 UTF-8 解码（表头"ID,标题,…"）+ BOM 校验 → inspector DELETE 403 / admin DELETE 200 / 无 token 401；前端 `npx tsc --noEmit` 0 错误 + `npm run build` 成功（162 kB）；Unity 脚本用编辑器自带 `DotNetSdkRoslyn/csc.dll` + `NetCoreRuntime/dotnet` + NetStandard 2.1 + UnityEngine 模块引用直接编译 Assets/Scripts → **0 error**（仅 CS0649 SerializeField 未赋值警告，正常）。
+- 检查/修改过程：①前端两页并行 Edit 多次"报成功但未落盘"（14 个 TS 错误：缺 handleSuggest/handleDelete/handleExport、未用 import），靠 `npx tsc --noEmit` 逐个补齐；②导出参数名前后端不一致（前端 `since/until` vs 后端 `from/to`）由 tsc TS2353 抓出后修正；③Unity batchmode 因编辑器占用崩溃（`HandleProjectAlreadyOpenInAnotherInstance`），改走 csc 直编；④git-bash 传中文 body 被 GBK 破坏致建议优先级误判 medium，改 python urllib UTF-8 重测确认 high 正常；⑤联调发现 8083 被上一次 `go run` 旧进程占用（P-016 同款），taskkill 后重启。
+- 待用户操作：**重新 Build And Run**（v1.4 新增序列化字段有默认值可不重跑场景生成器，但建议重跑一次固化）；管理端刷新浏览器即可（后端已在 :8083 运行）。
+
+## P-029
+
+- 目标：用户两个问题：① 又出现联网超时；② "触屏标识错的功能没有实现"（经确认：点击裂缝位置放置标识完全没反应）。
+
+### Prompt 原文
+
+> 1.又出现联网超时问题
+> 2.触屏标识错的功能没有实现，如何进行修改
+
+### 结果
+
+- **问题① 根因：电脑 IP 因 DHCP 再次变动**（10.216.180.140 → 192.168.117.140），App 内 baseUrl 仍是旧 IP 必超时；且 P-028 配的 adb reverse 兜底已随 adb 重连失效。后端本身正常（netstat 8083 监听、新 IP health 200）。
+- 修复（用户选定"双地址自动兜底"方案，杜绝 IP 变动再断连）：
+  1. `ApiClient.Send` 双地址兜底：第 1 次走主地址（局域网 IP），网络层失败第 2 次自动换 `FallbackBaseUrl`（localhost，经 adb reverse 直达电脑）；总尝试次数仍为 2（1 原始 + 1 重试，契约不变），最终错误文案列出两个已试地址；
+  2. 场景 + 生成器 baseUrl 同步 → `http://192.168.117.140:8083`（回归源头封堵）；
+  3. `adb reverse tcp:8083 tcp:8083` 已恢复；手机侧 curl health：localhost（兜底通道）与新 IP 两路均实测 `{"code":0,...,"status":"up"}`。
+- **问题② 根因：放置点击被 UI 射线检测静默吞掉**（命中 `PlaceFail.OverUi` 分支按设计静默，故表现为"没有反应"）：
+  1. FormPanel 半透明背景（底部 1020/1920 参考高，占屏 53%，alpha 0.45 透出相机画面）RaycastTarget=1——用户透过面板看到裂缝并点击 → 被判"点在 UI 上"→ 无任何提示；
+  2. GuidanceText 顶部满宽横幅（260px 高）与 StatusText 同样吃点击，真正可放置点击的区域仅剩屏上部约 30%；
+  3. 叠加隐患：`IsPointerOverGameObject(fingerId)` 在 Android 触摸路径有误报 true 的已知问题。
+- 修复：
+  1. 场景 + 生成器三处 `raycastTarget → 0`（FormPanel 背景 / StatusText / GuidanceText；纯展示层不吃点击，真实控件各自拦截自己的矩形，FR-U-08 防穿透不受影响）；
+  2. `PlaneAnchorPlacer.TryPlace` UI 判定改用 `EventSystem.RaycastAll` 逐结果判定（去掉误报源），`pointerId/fingerId` 参数随之删除（唯一调用方 ReportPanel 同步清理）。
+- 验证：场景 grep 复核 `m_RaycastTarget: 0` 恰好 3 处（&311239843 / &574037812 / &1247454700）无误伤；`fingerId|pointerId|IsPointerOverGameObject|10.216.180.140` 全仓仅剩注释 1 处；手机侧双通道 health 200。未新增序列化字段，**重新 Build And Run 即生效，无需重跑场景生成器**。
+- 待用户定夺的规则冲突（已按纪律报告）：android_ruler Q4 契约"再次点击平面将标记移动到新命中位置"与 v1.3 实现"放置即锁定"冲突（锁定为 P-022 用户需求）；本次未改行为，待定夺改规则文本或回退实现。
+- 防复发：① UI raycastTarget 只给真实控件，展示层一律 false（已同步进场景生成器，重跑不回退）；② "点击没反应"排查顺序固化：先查 OverUi（UI 射线遮挡）再查平面/点云命中；③ 双地址兜底后换网络不再断连，但 WiFi-only + IP 变动两地址皆失效时仍需更新 baseUrl 两处。
+
+## P-028
+
+- 目标：手机端提交上报报"网络请求失败（超时或无法连接服务器），请检查后端"（附真机截图），按五步排查法（后端状态→请求明细→health 校验→代理/防火墙/跨域→修复+验证）定位并解决"无法连接后端"。
+
+### Prompt 原文
+
+> 请协助排查并解决当前无法连接后端的问题。请按以下步骤执行：
+> 1. 首先检查本地开发环境的后端服务是否正常启动，确认服务监听的端口、主机地址与前端配置的请求地址完全一致
+> 2. 检查浏览器控制台的Network面板，查看请求的完整URL、请求方法、响应状态码以及具体的错误信息（如CORS跨域错误、连接超时、连接拒绝等）
+> 3. 验证后端服务的健康检查接口是否可以通过Postman或curl工具正常访问，排除后端服务本身的运行异常
+> 4. 检查是否存在代理配置、防火墙、跨域限制或网络策略导致的连接阻断
+> 5. 定位具体的故障根因后，提供可直接执行的修复方案，并给出验证连接恢复的测试步骤
+
+### 结果
+
+- 排查（按五步逐一排除，证据均实测）：
+  1. **后端本身正常**：netstat `0.0.0.0:8083` LISTENING；`curl http://localhost:8083/api/v1/health` 与 `curl http://10.216.180.140:8083/api/v1/health` 均返回 `{"code":0,"message":"ok","data":{"status":"up"}}` → 端口/监听地址无问题。报错端是 **Unity 手机端**（截图红字为 App 内提示），管理端浏览器（5173）与 CORS 不在故障路径上。
+  2. **真机网络层通**：手机 `ping 10.216.180.140` 0% 丢包；手机 shell `curl http://10.216.180.140:8083/api/v1/health` 直接拿到 JSON → 手机↔电脑链路与后端均可达。
+- 根因（两个叠加，缺一即失败）：
+  1. **场景 baseUrl 又退回 `http://localhost:8083`**（ARScene.unity 序列化值）——手机上的 localhost 指手机自己，必连接失败。**回归源头**：P-026 已改过场景 baseUrl，但场景生成器 `InspectionSceneBuilder.cs` 硬编码回写 `localhost`，用户重跑"一键生成 AR 场景"即被覆盖回去。
+  2. **Android 明文 HTTP 被禁**：`ProjectSettings.asset` 的 `insecureHttpOption: 0`（NotAllowed），已构建 manifest 的 `<application>` 无 `usesCleartextTraffic="true"`（Unity.Android.GradleProject.dll 含该注入逻辑），Android 9+ 默认拒绝 `http://` → 即使 IP 正确也连不上。
+  3. 附加风险（P-026 遗留）：Windows 防火墙无 8083 入站放行规则，外机首连可能被拦（本机自测通≠手机通）。
+- 修复（三处 + 一兜底）：
+  1. `Assets/Scenes/ARScene.unity` baseUrl → `http://10.216.180.140:8083`（当前 WLAN IPv4，手机 curl 实测通）；
+  2. `Assets/Editor/InspectionSceneBuilder.cs` 同步改为同一地址——**回归源头封堵**，再重跑场景生成器不再写回 localhost；
+  3. `ProjectSettings.asset` `insecureHttpOption: 0→2`（AlwaysAllowed，放行明文 HTTP）；防火墙新增入站规则 `UnityDemo-Backend-8083`（TCP 8083 allow，Domain/Private/Public 全覆盖）；
+  4. 兜底通道：`adb reverse tcp:8083 tcp:8083` 已配置——USB 连接下手机 `http://localhost:8083` 亦可直达电脑后端（实测通），换网络/IP 变更时可用。
+- 验证：手机侧 `curl http://10.216.180.140:8083/api/v1/health` → `{"code":0,"message":"ok","data":{"status":"up"}}`；手机侧 `curl http://localhost:8083/...`（经 adb reverse）同结果；`netsh show rule` 复核 UnityDemo-Backend-8083 = Enabled/TCP 8083/Allow。
+- 待用户执行（改动均为打包期生效，无需重跑场景生成器）：Unity 重新 **Build And Run**，打开 App 重新提交上报即应成功；若换网络导致电脑 IP 变化，同步改场景 baseUrl（或改走 adb reverse）。
+- 防复发：①生成器 baseUrl 硬编码已同步修正（回归源头），换 IP 时"场景 + 生成器"两处一起改；②"手机端网络请求失败"排查顺序固化：手机 ping 电脑 → 手机 curl health → 依次查 baseUrl / 明文 HTTP / 防火墙三层；③adb reverse 作为 USB 兜底通道记录在案。
+
 ## P-027
 
 - 目标：用户再次反馈"仍不能成功识别裂缝"，要求**换个思路**定位并修改平面识别不出来的错误（附真机截图：30 秒超时提示）。
